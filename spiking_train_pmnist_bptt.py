@@ -4,17 +4,49 @@ import time
 import torch
 
 import torch.nn.functional as F
+from torch import nn
 
 from torch.utils.tensorboard import SummaryWriter
-import models
+
 import argparse
 import math
-from utils import Bar, AverageMeter, accuracy
 
-from modules import functional
+from FLcore import models
+# from FLcore.modules import functional
+from FLcore.utils import Bar, accuracy
+from FLcore.meter import AverageMeter
+
+
+def reset_net(net: nn.Module):
+    '''
+    * :ref:`API in English <reset_net-en>`
+
+    .. _reset_net-cn:
+
+    :param net: 任何属于 ``nn.Module`` 子类的网络
+
+    :return: None
+
+    将网络的状态重置。做法是遍历网络中的所有 ``Module``，若含有 ``reset()`` 函数，则调用。
+
+    * :ref:`中文API <reset_net-cn>`
+
+    .. _reset_net-en:
+
+    :param net: Any network inherits from ``nn.Module``
+
+    :return: None
+
+    Reset the whole network.  Walk through every ``Module`` and call their ``reset()`` function if exists.
+    '''
+    for m in net.modules():
+        if hasattr(m, 'reset'):
+            m.reset()
+
 
 _seed_ = 2022
 import random
+
 random.seed(_seed_)
 
 torch.manual_seed(_seed_)  # use torch.manual_seed() to seed the RNG for all devices (both CPU and CUDA)
@@ -23,6 +55,7 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 import numpy as np
+
 np.random.seed(_seed_)
 
 torch.set_num_threads(4)
@@ -37,18 +70,18 @@ def test(args, model, x, y, task_id):
     top1 = AverageMeter()
     top5 = AverageMeter()
     end = time.time()
-    bar = Bar('Processing', max=((x.size(0)-1)//args.b+1))
+    bar = Bar('Processing', max=((x.size(0) - 1) // args.b + 1))
 
     test_loss = 0
     test_acc = 0
     test_samples = 0
     batch_idx = 0
 
-    r=np.arange(x.size(0))
+    r = np.arange(x.size(0))
     with torch.no_grad():
         for i in range(0, len(r), args.b):
             if i + args.b <= len(r):
-                index = r[i : i + args.b]
+                index = r[i: i + args.b]
             else:
                 index = r[i:]
             batch_idx += 1
@@ -59,8 +92,8 @@ def test(args, model, x, y, task_id):
             out = model(input, task_id, projection=False, update_hlop=False)
             loss = F.cross_entropy(out, label)
 
-            functional.reset_net(model)
-                
+            reset_net(model)
+
             test_samples += label.numel()
             test_loss += loss.item() * label.numel()
             test_acc += (out.argmax(1) == label).float().sum().item()
@@ -76,17 +109,17 @@ def test(args, model, x, y, task_id):
             end = time.time()
 
             # plot progress
-            bar.suffix  = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
-                        batch=batch_idx,
-                        size=((x.size(0)-1)//args.b+1),
-                        data=data_time.avg,
-                        bt=batch_time.avg,
-                        total=bar.elapsed_td,
-                        eta=bar.eta_td,
-                        loss=losses.avg,
-                        top1=top1.avg,
-                        top5=top5.avg,
-                        )
+            bar.suffix = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
+                batch=batch_idx,
+                size=((x.size(0) - 1) // args.b + 1),
+                data=data_time.avg,
+                bt=batch_time.avg,
+                total=bar.elapsed_td,
+                eta=bar.eta_td,
+                loss=losses.avg,
+                top1=top1.avg,
+                top5=top5.avg,
+            )
             bar.next()
     bar.finish()
 
@@ -97,7 +130,6 @@ def test(args, model, x, y, task_id):
 
 
 def main():
-
     parser = argparse.ArgumentParser(description='Classify PMNIST')
     parser.add_argument('-b', default=64, type=int, help='batch size')
     parser.add_argument('-epochs', default=1, type=int, metavar='N',
@@ -139,9 +171,6 @@ def main():
     parser.add_argument('-hlop_spiking_scale', default=20., type=float)
     parser.add_argument('-hlop_spiking_timesteps', default=1000., type=float)
 
-
-
-
     args = parser.parse_args()
 
     # Use CUDA
@@ -150,12 +179,12 @@ def main():
     from FLcore.dataloader import pmnist as pmd
     data, taskcla, inputsize = pmd.get(data_dir=args.data_dir, seed=_seed_)
 
-    acc_matrix=np.zeros((10,10))
+    acc_matrix = np.zeros((10, 10))
     criterion = torch.nn.CrossEntropyLoss()
 
     task_id = 0
     task_list = []
-    
+
     hlop_out_num = [80, 200, 100]
     hlop_out_num_inc = [70, 70, 70]
 
@@ -178,16 +207,16 @@ def main():
         args_txt.write(str(args))
 
     for k, ncla in taskcla:
-        print('*'*100)
-        print('Task {:2d} ({:s})'.format(k,data[k]['name']))
-        print('*'*100)
+        print('*' * 100)
+        print('Task {:2d} ({:s})'.format(k, data[k]['name']))
+        print('*' * 100)
 
         writer = SummaryWriter(os.path.join(out_dir, 'logs_task{task_id}'.format(task_id=task_id)))
 
-        xtrain=data[k]['train']['x']
-        ytrain=data[k]['train']['y']
-        xtest =data[k]['test']['x']
-        ytest =data[k]['test']['y']
+        xtrain = data[k]['train']['x']
+        ytrain = data[k]['train']['y']
+        xtest = data[k]['test']['x']
+        ytest = data[k]['test']['y']
         task_list.append(k)
 
         if args.replay:
@@ -206,7 +235,10 @@ def main():
             replay_data[task_id]['y'] = torch.stack(replay_data[task_id]['y'], dim=0)
 
         if task_id == 0:
-            model = models.spiking_MLP_bptt(num_classes=ncla, n_hidden=800, ss=args.sign_symmetric, fa=args.feedback_alignment, timesteps=args.timesteps, hlop_spiking=args.hlop_spiking, hlop_spiking_scale=args.hlop_spiking_scale, hlop_spiking_timesteps=args.hlop_spiking_timesteps)
+            model = models.spiking_MLP_bptt(num_classes=ncla, n_hidden=800, ss=args.sign_symmetric,
+                                            fa=args.feedback_alignment, timesteps=args.timesteps,
+                                            hlop_spiking=args.hlop_spiking, hlop_spiking_scale=args.hlop_spiking_scale,
+                                            hlop_spiking_timesteps=args.hlop_spiking_timesteps)
 
             model.add_hlop_subspace(hlop_out_num)
             model = model.cuda()
@@ -236,8 +268,9 @@ def main():
         if args.lr_scheduler == 'StepLR':
             lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
         elif args.lr_scheduler == 'CosALR':
-            #lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.T_max)
-            lr_lambda = lambda cur_epoch: (cur_epoch + 1) / args.warmup if cur_epoch < args.warmup else 0.5 * (1 + math.cos((cur_epoch - args.warmup) / (args.T_max - args.warmup) * math.pi))
+            # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.T_max)
+            lr_lambda = lambda cur_epoch: (cur_epoch + 1) / args.warmup if cur_epoch < args.warmup else 0.5 * (
+                        1 + math.cos((cur_epoch - args.warmup) / (args.T_max - args.warmup) * math.pi))
             lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
         else:
             raise NotImplementedError(args.lr_scheduler)
@@ -255,7 +288,7 @@ def main():
             top5 = AverageMeter()
             end = time.time()
 
-            bar = Bar('Processing', max=((xtrain.size(0)-1)//args.b+1))
+            bar = Bar('Processing', max=((xtrain.size(0) - 1) // args.b + 1))
 
             train_loss = 0
             train_acc = 0
@@ -266,7 +299,7 @@ def main():
             np.random.shuffle(r)
             for i in range(0, len(r), args.b):
                 if i + args.b <= len(r):
-                    index = r[i : i + args.b]
+                    index = r[i: i + args.b]
                 else:
                     index = r[i:]
                 batch_idx += 1
@@ -285,17 +318,20 @@ def main():
                             out = model(x, task_id, projection=False, update_hlop=True)
                 else:
                     if args.baseline:
-                        out = model(x, task_id, projection=False, proj_id_list=[0], update_hlop=False, fix_subspace_id_list=[0])
+                        out = model(x, task_id, projection=False, proj_id_list=[0], update_hlop=False,
+                                    fix_subspace_id_list=[0])
                     else:
                         if epoch <= args.hlop_start_epochs:
-                            out = model(x, task_id, projection=True, proj_id_list=[0], update_hlop=False, fix_subspace_id_list=[0])
+                            out = model(x, task_id, projection=True, proj_id_list=[0], update_hlop=False,
+                                        fix_subspace_id_list=[0])
                         else:
-                            out = model(x, task_id, projection=True, proj_id_list=[0], update_hlop=True, fix_subspace_id_list=[0])
+                            out = model(x, task_id, projection=True, proj_id_list=[0], update_hlop=True,
+                                        fix_subspace_id_list=[0])
                 loss = F.cross_entropy(out, label)
                 loss.backward()
                 optimizer.step()
 
-                functional.reset_net(model)
+                reset_net(model)
 
                 train_loss += loss.item() * label.numel()
 
@@ -305,7 +341,6 @@ def main():
                 top1.update(prec1.item(), x.size(0))
                 top5.update(prec5.item(), x.size(0))
 
-
                 train_samples += label.numel()
                 train_acc += (out.argmax(1) == label).float().sum().item()
 
@@ -314,17 +349,17 @@ def main():
                 end = time.time()
 
                 # plot progress
-                bar.suffix  = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
-                            batch=batch_idx,
-                            size=((xtrain.size(0)-1)//args.b+1),
-                            data=data_time.avg,
-                            bt=batch_time.avg,
-                            total=bar.elapsed_td,
-                            eta=bar.eta_td,
-                            loss=losses.avg,
-                            top1=top1.avg,
-                            top5=top5.avg,
-                            )
+                bar.suffix = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
+                    batch=batch_idx,
+                    size=((xtrain.size(0) - 1) // args.b + 1),
+                    data=data_time.avg,
+                    bt=batch_time.avg,
+                    total=bar.elapsed_td,
+                    eta=bar.eta_td,
+                    loss=losses.avg,
+                    top1=top1.avg,
+                    top5=top5.avg,
+                )
                 bar.next()
             bar.finish()
 
@@ -341,20 +376,21 @@ def main():
             writer.add_scalar('test_acc', test_acc, epoch)
 
             total_time = time.time() - start_time
-            print(f'epoch={epoch}, train_loss={train_loss}, train_acc={train_acc}, test_loss={test_loss}, test_acc={test_acc}, total_time={total_time}, escape_time={(datetime.datetime.now()+datetime.timedelta(seconds=total_time * (args.epochs - epoch))).strftime("%Y-%m-%d %H:%M:%S")}')
+            print(
+                f'epoch={epoch}, train_loss={train_loss}, train_acc={train_acc}, test_loss={test_loss}, test_acc={test_acc}, total_time={total_time}, escape_time={(datetime.datetime.now() + datetime.timedelta(seconds=total_time * (args.epochs - epoch))).strftime("%Y-%m-%d %H:%M:%S")}')
 
         # save accuracy 
-        jj = 0 
-        for ii in np.array(task_list)[0:task_id+1]:
-            xtest =data[ii]['test']['x']
-            ytest =data[ii]['test']['y'] 
-            _, acc_matrix[task_id,jj] = test(args, model, xtest, ytest, ii) 
-            jj +=1
+        jj = 0
+        for ii in np.array(task_list)[0:task_id + 1]:
+            xtest = data[ii]['test']['x']
+            ytest = data[ii]['test']['y']
+            _, acc_matrix[task_id, jj] = test(args, model, xtest, ytest, ii)
+            jj += 1
         print('Accuracies =')
-        for i_a in range(task_id+1):
-            print('\t',end='')
+        for i_a in range(task_id + 1):
+            print('\t', end='')
             for j_a in range(acc_matrix.shape[1]):
-                print('{:5.1f}% '.format(acc_matrix[i_a,j_a]*100),end='')
+                print('{:5.1f}% '.format(acc_matrix[i_a, j_a] * 100), end='')
             print()
 
         model.merge_hlop_subspace()
@@ -363,22 +399,23 @@ def main():
         torch.save(model.state_dict(), os.path.join(pt_dir, 'model_task{task_id}.pth'.format(task_id=task_id)))
 
         # update task id 
-        task_id +=1
+        task_id += 1
 
-    print('-'*50)
+    print('-' * 50)
     # Simulation Results 
-    print ('Task Order : {}'.format(np.array(task_list)))
-    print ('Final Avg Accuracy: {:5.2f}%'.format(acc_matrix[-1].mean()*100)) 
-    bwt=np.mean((acc_matrix[-1]-np.diag(acc_matrix))[:-1]) 
-    print ('Backward transfer: {:5.2f}%'.format(bwt*100))
-    print('-'*50)
+    print('Task Order : {}'.format(np.array(task_list)))
+    print('Final Avg Accuracy: {:5.2f}%'.format(acc_matrix[-1].mean() * 100))
+    bwt = np.mean((acc_matrix[-1] - np.diag(acc_matrix))[:-1])
+    print('Backward transfer: {:5.2f}%'.format(bwt * 100))
+    print('-' * 50)
     # Plots
-    #array = acc_matrix
-    #df_cm = pd.DataFrame(array, index = [i for i in ["T1","T2","T3","T4","T5","T6","T7","T8","T9","T10"]],
+    # array = acc_matrix
+    # df_cm = pd.DataFrame(array, index = [i for i in ["T1","T2","T3","T4","T5","T6","T7","T8","T9","T10"]],
     #                  columns = [i for i in ["T1","T2","T3","T4","T5","T6","T7","T8","T9","T10"]])
-    #sn.set(font_scale=1.4) 
-    #sn.heatmap(df_cm, annot=True, annot_kws={"size": 10})
-    #plt.show()
+    # sn.set(font_scale=1.4)
+    # sn.heatmap(df_cm, annot=True, annot_kws={"size": 10})
+    # plt.show()
+
 
 if __name__ == '__main__':
     main()

@@ -1,26 +1,27 @@
-### This file is modified from : https://github.com/joansj/hat/blob/master/src/dataloaders/mixture.py
-import os,sys
+import os
 import os.path
+import pickle
+import sys
+import urllib.request
+
 import numpy as np
 import torch
 import torch.utils.data
-from torchvision import datasets,transforms
-from sklearn.utils import shuffle
-import urllib.request
 from PIL import Image
-import pickle
+from torchvision import datasets, transforms
+
 
 ########################################################################################################################
 
-def get(data_dir='./data/', seed=1,fixed_order=False):
-    data={}
-    taskcla=[]
-    size=[3,32,32]
+def get(data_dir='./data/', seed=1, fixed_order=False):
+    data = {}
+    taskcla = []
+    size = [3, 32, 32]
 
-    idata=np.arange(5)
+    idata = np.arange(5)
     # if not fixed_order:
     #     idata=list(shuffle(idata,random_state=seed))
-    print('Task order =',idata)
+    print('Task order =', idata)
 
     five_data_dir = os.path.join(data_dir, 'Five_data')
     file_dir = os.path.join(five_data_dir, 'binary_mixture_5_Data')
@@ -28,21 +29,23 @@ def get(data_dir='./data/', seed=1,fixed_order=False):
     if not os.path.isdir(file_dir):
         os.makedirs(file_dir)
         # Pre-load
-        for n,idx in enumerate(idata):
-            if idx==0:
+        for n, idx in enumerate(idata):
+            if idx == 0:
                 # CIFAR10
-                mean=[x/255 for x in [125.3,123.0,113.9]]
-                std=[x/255 for x in [63.0,62.1,66.7]]
-                dat={}
-                dat['train']=datasets.CIFAR10(five_data_dir,train=True,download=True,transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean,std)]))
-                dat['test']=datasets.CIFAR10(five_data_dir,train=False,download=True,transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean,std)]))
-                data[n]={}
-                data[n]['name']='cifar10'
-                data[n]['ncla']=10
-                for s in ['train','test']:
-                    loader=torch.utils.data.DataLoader(dat[s],batch_size=1,shuffle=False)
-                    data[n][s]={'x': [],'y': []}
-                    for image,target in loader:
+                mean = [x / 255 for x in [125.3, 123.0, 113.9]]
+                std = [x / 255 for x in [63.0, 62.1, 66.7]]
+                dat = {}
+                dat['train'] = datasets.CIFAR10(five_data_dir, train=True, download=True, transform=transforms.Compose(
+                    [transforms.ToTensor(), transforms.Normalize(mean, std)]))
+                dat['test'] = datasets.CIFAR10(five_data_dir, train=False, download=True, transform=transforms.Compose(
+                    [transforms.ToTensor(), transforms.Normalize(mean, std)]))
+                data[n] = {}
+                data[n]['name'] = 'cifar10'
+                data[n]['ncla'] = 10
+                for s in ['train', 'test']:
+                    loader = torch.utils.data.DataLoader(dat[s], batch_size=1, shuffle=False)
+                    data[n][s] = {'x': [], 'y': []}
+                    for image, target in loader:
                         data[n][s]['x'].append(image)
                         data[n][s]['y'].append(target.numpy()[0])
 
@@ -63,39 +66,41 @@ def get(data_dir='./data/', seed=1,fixed_order=False):
             #             data[n][s]['x'].append(image)
             #             data[n][s]['y'].append(target.numpy()[0])
 
-            elif idx==1:
+            elif idx == 1:
                 # MNIST
-                #mean=(0.1307,) # Mean and std without including the padding
-                #std=(0.3081,)
-                mean=(0.1,) # Mean and std including the padding
-                std=(0.2752,)
-                dat={}
-                dat['train']=datasets.MNIST(five_data_dir,train=True,download=True,transform=transforms.Compose([
-                    transforms.Pad(padding=2,fill=0),transforms.ToTensor(),transforms.Normalize(mean,std)]))
-                dat['test']=datasets.MNIST(five_data_dir,train=False,download=True,transform=transforms.Compose([
-                    transforms.Pad(padding=2,fill=0),transforms.ToTensor(),transforms.Normalize(mean,std)]))
-                data[n]={}
-                data[n]['name']='mnist'
-                data[n]['ncla']=10
-                for s in ['train','test']:
-                    loader=torch.utils.data.DataLoader(dat[s],batch_size=1,shuffle=False)
-                    data[n][s]={'x': [],'y': []}
-                    for image,target in loader:
-                        image=image.expand(1,3,image.size(2),image.size(3)) # Create 3 equal channels
+                # mean=(0.1307,) # Mean and std without including the padding
+                # std=(0.3081,)
+                mean = (0.1,)  # Mean and std including the padding
+                std = (0.2752,)
+                dat = {}
+                dat['train'] = datasets.MNIST(five_data_dir, train=True, download=True, transform=transforms.Compose([
+                    transforms.Pad(padding=2, fill=0), transforms.ToTensor(), transforms.Normalize(mean, std)]))
+                dat['test'] = datasets.MNIST(five_data_dir, train=False, download=True, transform=transforms.Compose([
+                    transforms.Pad(padding=2, fill=0), transforms.ToTensor(), transforms.Normalize(mean, std)]))
+                data[n] = {}
+                data[n]['name'] = 'mnist'
+                data[n]['ncla'] = 10
+                for s in ['train', 'test']:
+                    loader = torch.utils.data.DataLoader(dat[s], batch_size=1, shuffle=False)
+                    data[n][s] = {'x': [], 'y': []}
+                    for image, target in loader:
+                        image = image.expand(1, 3, image.size(2), image.size(3))  # Create 3 equal channels
                         data[n][s]['x'].append(image)
                         data[n][s]['y'].append(target.numpy()[0])
 
             elif idx == 2:
                 # SVHN
-                mean=[0.4377,0.4438,0.4728]
-                std=[0.198,0.201,0.197]
+                mean = [0.4377, 0.4438, 0.4728]
+                std = [0.198, 0.201, 0.197]
                 dat = {}
-                dat['train']=datasets.SVHN(five_data_dir,split='train',download=True,transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean,std)]))
-                dat['test']=datasets.SVHN(five_data_dir,split='test',download=True,transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean,std)]))
+                dat['train'] = datasets.SVHN(five_data_dir, split='train', download=True, transform=transforms.Compose(
+                    [transforms.ToTensor(), transforms.Normalize(mean, std)]))
+                dat['test'] = datasets.SVHN(five_data_dir, split='test', download=True, transform=transforms.Compose(
+                    [transforms.ToTensor(), transforms.Normalize(mean, std)]))
                 data[n] = {}
-                data[n]['name']='svhn'
-                data[n]['ncla']=10
-                for s in ['train','test']:
+                data[n]['name'] = 'svhn'
+                data[n]['ncla'] = 10
+                for s in ['train', 'test']:
                     loader = torch.utils.data.DataLoader(dat[s], batch_size=1, shuffle=False)
                     data[n][s] = {'x': [], 'y': []}
                     for image, target in loader:
@@ -104,21 +109,23 @@ def get(data_dir='./data/', seed=1,fixed_order=False):
 
             elif idx == 3:
                 # FashionMNIST
-                mean=(0.2190,) # Mean and std including the padding
-                std=(0.3318,)
-                dat={}
-                dat['train']=datasets.FashionMNIST(os.path.join(five_data_dir, 'fashion_mnist'), train=True, download=True, transform=transforms.Compose([
-                    transforms.Pad(padding=2, fill=0), transforms.ToTensor(),transforms.Normalize(mean, std)]))
-                dat['test']=datasets.FashionMNIST(os.path.join(five_data_dir, 'fashion_mnist'), train=False, download=True, transform=transforms.Compose([
-                    transforms.Pad(padding=2, fill=0), transforms.ToTensor(),transforms.Normalize(mean, std)]))
-                data[n]={}
-                data[n]['name']='fashion-mnist'
-                data[n]['ncla']=10
-                for s in ['train','test']:
-                    loader=torch.utils.data.DataLoader(dat[s], batch_size=1, shuffle=False)
-                    data[n][s]={'x': [], 'y': []}
-                    for image,target in loader:
-                        image=image.expand(1, 3, image.size(2), image.size(3))  # Create 3 equal channels
+                mean = (0.2190,)  # Mean and std including the padding
+                std = (0.3318,)
+                dat = {}
+                dat['train'] = datasets.FashionMNIST(os.path.join(five_data_dir, 'fashion_mnist'), train=True,
+                                                     download=True, transform=transforms.Compose([
+                        transforms.Pad(padding=2, fill=0), transforms.ToTensor(), transforms.Normalize(mean, std)]))
+                dat['test'] = datasets.FashionMNIST(os.path.join(five_data_dir, 'fashion_mnist'), train=False,
+                                                    download=True, transform=transforms.Compose([
+                        transforms.Pad(padding=2, fill=0), transforms.ToTensor(), transforms.Normalize(mean, std)]))
+                data[n] = {}
+                data[n]['name'] = 'fashion-mnist'
+                data[n]['ncla'] = 10
+                for s in ['train', 'test']:
+                    loader = torch.utils.data.DataLoader(dat[s], batch_size=1, shuffle=False)
+                    data[n][s] = {'x': [], 'y': []}
+                    for image, target in loader:
+                        image = image.expand(1, 3, image.size(2), image.size(3))  # Create 3 equal channels
                         data[n][s]['x'].append(image)
                         data[n][s]['y'].append(target.numpy()[0])
 
@@ -158,75 +165,81 @@ def get(data_dir='./data/', seed=1,fixed_order=False):
             #             data[n][s]['y'].append(target.numpy()[0])
             elif idx == 4:
                 # notMNIST A-J letters
-                mean=(0.4254,)
-                std=(0.4501,)
-                dat={}
-                dat['train']=notMNIST(os.path.join(five_data_dir, 'notmnist'), train=True, download=True, transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean,std)]))
-                dat['test']=notMNIST(os.path.join(five_data_dir, 'notmnist'), train=False, download=True, transform=transforms.Compose([transforms.ToTensor(),transforms.Normalize(mean,std)]))
-                #mean, std = utils.compute_mean_std_dataset(dat['train']); print(mean,std); sys.exit()
-                data[n]={}
-                data[n]['name']='notmnist'
-                data[n]['ncla']=10
-                for s in ['train','test']:
+                mean = (0.4254,)
+                std = (0.4501,)
+                dat = {}
+                dat['train'] = notMNIST(os.path.join(five_data_dir, 'notmnist'), train=True, download=True,
+                                        transform=transforms.Compose(
+                                            [transforms.ToTensor(), transforms.Normalize(mean, std)]))
+                dat['test'] = notMNIST(os.path.join(five_data_dir, 'notmnist'), train=False, download=True,
+                                       transform=transforms.Compose(
+                                           [transforms.ToTensor(), transforms.Normalize(mean, std)]))
+                # mean, std = utils.compute_mean_std_dataset(dat['train']); print(mean,std); sys.exit()
+                data[n] = {}
+                data[n]['name'] = 'notmnist'
+                data[n]['ncla'] = 10
+                for s in ['train', 'test']:
                     loader = torch.utils.data.DataLoader(dat[s], batch_size=1, shuffle=False)
                     data[n][s] = {'x': [], 'y': []}
                     for image, target in loader:
-                        image=image.expand(1,3,image.size(2),image.size(3))
+                        image = image.expand(1, 3, image.size(2), image.size(3))
                         data[n][s]['x'].append(image)
                         data[n][s]['y'].append(target.numpy()[0])
             else:
-                print('ERROR: Undefined data set',n)
+                print('ERROR: Undefined data set', n)
                 sys.exit()
-            #print(n,data[n]['name'],data[n]['ncla'],len(data[n]['train']['x']))
+            # print(n,data[n]['name'],data[n]['ncla'],len(data[n]['train']['x']))
 
             # "Unify" and save
-            for s in ['train','test']:
-                data[n][s]['x']=torch.stack(data[n][s]['x']).view(-1,size[0],size[1],size[2])
-                data[n][s]['y']=torch.LongTensor(np.array(data[n][s]['y'],dtype=int)).view(-1)
-                torch.save(data[n][s]['x'], os.path.join(os.path.expanduser(file_dir),'data'+str(idx)+s+'x.bin'))
-                torch.save(data[n][s]['y'], os.path.join(os.path.expanduser(file_dir),'data'+str(idx)+s+'y.bin'))
+            for s in ['train', 'test']:
+                data[n][s]['x'] = torch.stack(data[n][s]['x']).view(-1, size[0], size[1], size[2])
+                data[n][s]['y'] = torch.LongTensor(np.array(data[n][s]['y'], dtype=int)).view(-1)
+                torch.save(data[n][s]['x'], os.path.join(os.path.expanduser(file_dir), 'data' + str(idx) + s + 'x.bin'))
+                torch.save(data[n][s]['y'], os.path.join(os.path.expanduser(file_dir), 'data' + str(idx) + s + 'y.bin'))
 
     else:
 
         # Load binary files
-        for n,idx in enumerate(idata):
-            data[n] = dict.fromkeys(['name','ncla','train','test'])
-            if idx==0:
-                data[n]['name']='cifar10'
-                data[n]['ncla']=10
+        for n, idx in enumerate(idata):
+            data[n] = dict.fromkeys(['name', 'ncla', 'train', 'test'])
+            if idx == 0:
+                data[n]['name'] = 'cifar10'
+                data[n]['ncla'] = 10
             # elif idx==1:
             #     data[n]['name']='cifar100'
             #     data[n]['ncla']=100
-            elif idx==1:
-                data[n]['name']='mnist'
-                data[n]['ncla']=10
-            elif idx==2:
-                data[n]['name']='svhn'
-                data[n]['ncla']=10
-            elif idx==3:
-                data[n]['name']='fashion-mnist'
-                data[n]['ncla']=10
+            elif idx == 1:
+                data[n]['name'] = 'mnist'
+                data[n]['ncla'] = 10
+            elif idx == 2:
+                data[n]['name'] = 'svhn'
+                data[n]['ncla'] = 10
+            elif idx == 3:
+                data[n]['name'] = 'fashion-mnist'
+                data[n]['ncla'] = 10
             # elif idx==5:
             #     data[n]['name']='traffic-signs'
             #     data[n]['ncla']=43
             # elif idx==6:
             #     data[n]['name']='facescrub'
             #     data[n]['ncla']=100
-            elif idx==4:
-                data[n]['name']='notmnist'
-                data[n]['ncla']=10
+            elif idx == 4:
+                data[n]['name'] = 'notmnist'
+                data[n]['ncla'] = 10
             else:
-                print('ERROR: Undefined data set',n)
+                print('ERROR: Undefined data set', n)
                 sys.exit()
 
             # Load
-            for s in ['train','test']:
-                data[n][s]={'x':[],'y':[]}
-                data[n][s]['x'] = torch.load(os.path.join(os.path.expanduser(file_dir),'data'+str(idx)+s+'x.bin'))
-                data[n][s]['y'] = torch.load(os.path.join(os.path.expanduser(file_dir),'data'+str(idx)+s+'y.bin'))
+            for s in ['train', 'test']:
+                data[n][s] = {'x': [], 'y': []}
+                data[n][s]['x'] = torch.load(
+                    os.path.join(os.path.expanduser(file_dir), 'data' + str(idx) + s + 'x.bin'))
+                data[n][s]['y'] = torch.load(
+                    os.path.join(os.path.expanduser(file_dir), 'data' + str(idx) + s + 'y.bin'))
 
     ## Validation
-    #for t in data.keys():
+    # for t in data.keys():
     #    r=np.arange(data[t]['train']['x'].size(0))
     #    r=np.array(shuffle(r,random_state=seed),dtype=int)
     #    nvalid=int(pc_valid*len(r))
@@ -239,13 +252,14 @@ def get(data_dir='./data/', seed=1,fixed_order=False):
     #    data[t]['train']['y']=data[t]['train']['y'][itrain].clone()
 
     # Others
-    n=0
+    n = 0
     for t in data.keys():
-        taskcla.append((t,data[t]['ncla']))
-        n+=data[t]['ncla']
-    data['ncla']=n
+        taskcla.append((t, data[t]['ncla']))
+        n += data[t]['ncla']
+    data['ncla'] = n
 
-    return data,taskcla,size
+    return data, taskcla, size
+
 
 ########################################################################################################################
 
@@ -264,7 +278,7 @@ class TrafficSigns(torch.utils.data.Dataset):
 
     """
 
-    def __init__(self, root, train=True,transform=None, download=False):
+    def __init__(self, root, train=True, transform=None, download=False):
         self.root = os.path.expanduser(root)
         self.transform = transform
         self.filename = "traffic_signs_dataset.zip"
@@ -277,26 +291,26 @@ class TrafficSigns(torch.utils.data.Dataset):
         fpath = os.path.join(root, self.filename)
         if not os.path.isfile(fpath):
             if not download:
-               raise RuntimeError('Dataset not found. You can use download=True to download it')
+                raise RuntimeError('Dataset not found. You can use download=True to download it')
             else:
-                print('Downloading from '+self.url)
+                print('Downloading from ' + self.url)
                 self.download()
 
         training_file = 'lab 2 data/train.p'
         testing_file = 'lab 2 data/test.p'
         if train:
-            with open(os.path.join(root,training_file), mode='rb') as f:
+            with open(os.path.join(root, training_file), mode='rb') as f:
                 train = pickle.load(f)
             self.data = train['features']
             self.labels = train['labels']
         else:
-            with open(os.path.join(root,testing_file), mode='rb') as f:
+            with open(os.path.join(root, testing_file), mode='rb') as f:
                 test = pickle.load(f)
             self.data = test['features']
             self.labels = test['labels']
 
         self.data = np.transpose(self.data, (0, 3, 1, 2))
-        #print(self.data.shape); sys.exit()
+        # print(self.data.shape); sys.exit()
 
     def __getitem__(self, index):
         """
@@ -353,24 +367,24 @@ class Facescrub(torch.utils.data.Dataset):
 
     """
 
-    def __init__(self, root, train=True,transform=None, download=False):
+    def __init__(self, root, train=True, transform=None, download=False):
         self.root = os.path.expanduser(root)
         self.transform = transform
         self.filename = "facescrub_100.zip"
         self.url = "https://github.com/nkundiushuti/facescrub_subset/blob/master/data/facescrub_100.zip?raw=true"
 
-        fpath=os.path.join(root,self.filename)
+        fpath = os.path.join(root, self.filename)
         if not os.path.isfile(fpath):
             if not download:
-               raise RuntimeError('Dataset not found. You can use download=True to download it')
+                raise RuntimeError('Dataset not found. You can use download=True to download it')
             else:
-                print('Downloading from '+self.url)
+                print('Downloading from ' + self.url)
                 self.download()
 
         training_file = 'facescrub_train_100.pkl'
         testing_file = 'facescrub_test_100.pkl'
         if train:
-            with open(os.path.join(root,training_file),'rb') as f:
+            with open(os.path.join(root, training_file), 'rb') as f:
                 # u = pickle._Unpickler(f)
                 # u.encoding = 'latin1'
                 # train  = u.load()
@@ -384,7 +398,7 @@ class Facescrub(torch.utils.data.Dataset):
             print(self.labels.max())
             #"""
         else:
-            with open(os.path.join(root,testing_file),'rb') as f:
+            with open(os.path.join(root, testing_file), 'rb') as f:
                 # u = pickle._Unpickler(f)
                 # u.encoding = 'latin1'
                 # test  = u.load()
@@ -450,7 +464,7 @@ class notMNIST(torch.utils.data.Dataset):
 
     """
 
-    def __init__(self, root, train=True,transform=None, download=False):
+    def __init__(self, root, train=True, transform=None, download=False):
         self.root = os.path.expanduser(root)
         self.transform = transform
         self.filename = "notmnist.zip"
@@ -459,15 +473,15 @@ class notMNIST(torch.utils.data.Dataset):
         fpath = os.path.join(root, self.filename)
         if not os.path.isfile(fpath):
             if not download:
-               raise RuntimeError('Dataset not found. You can use download=True to download it')
+                raise RuntimeError('Dataset not found. You can use download=True to download it')
             else:
-                print('Downloading from '+self.url)
+                print('Downloading from ' + self.url)
                 self.download()
 
         training_file = 'notmnist_train.pkl'
         testing_file = 'notmnist_test.pkl'
         if train:
-            with open(os.path.join(root,training_file),'rb') as f:
+            with open(os.path.join(root, training_file), 'rb') as f:
                 # u = pickle._Unpickler(f)
                 # u.encoding = 'latin1'
                 # train  = u.load()
@@ -475,7 +489,7 @@ class notMNIST(torch.utils.data.Dataset):
             self.data = train['features'].astype(np.uint8)
             self.labels = train['labels'].astype(np.uint8)
         else:
-            with open(os.path.join(root,testing_file),'rb') as f:
+            with open(os.path.join(root, testing_file), 'rb') as f:
                 # u = pickle._Unpickler(f)
                 # u.encoding = 'latin1'
                 # test  = u.load()
@@ -483,7 +497,6 @@ class notMNIST(torch.utils.data.Dataset):
 
             self.data = test['features'].astype(np.uint8)
             self.labels = test['labels'].astype(np.uint8)
-
 
     def __getitem__(self, index):
         """
@@ -522,6 +535,5 @@ class notMNIST(torch.utils.data.Dataset):
         zip_ref = zipfile.ZipFile(fpath, 'r')
         zip_ref.extractall(root)
         zip_ref.close()
-
 
 ########################################################################################################################

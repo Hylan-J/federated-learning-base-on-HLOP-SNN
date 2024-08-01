@@ -1,32 +1,40 @@
 import datetime
 import os
 import time
-import torch
-
-import torch.nn.functional as F
-
-from torch.utils.tensorboard import SummaryWriter
-import models
 import argparse
 import math
-from utils import Bar, AverageMeter, accuracy
-
-_seed_ = 2022
 import random
 
-random.seed(_seed_)
-
-torch.manual_seed(_seed_)  # use torch.manual_seed() to seed the RNG for all devices (both CPU and CUDA)
-torch.cuda.manual_seed_all(_seed_)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
-
 import numpy as np
+import torch
+import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
 
+import FLcore.models
+from FLcore import models
+from FLcore.aggregation import FedAvg
+from FLcore.client import Client
+from FLcore.server import Server
+from FLcore.utils import Bar, accuracy
+from FLcore.meter import AverageMeter
+from FLcore.dataloader import cifar100 as cf100
+
+# 随机数种子
+_seed_ = 2022
+# 设置Python 的随机数生成器的种子。这将确保随机数生成器生成的随机序列是可预测的
+random.seed(_seed_)
+# 设置NumPy的随机数生成器的种子。这将确保在使用NumPy进行随机操作时得到可重复的结果
 np.random.seed(_seed_)
-
-
-# torch.set_num_threads(4)
+# 设置PyTorch的随机数生成器的种子。这将确保在使用PyTorch进行随机操作时得到可重复的结果
+torch.random.manual_seed(_seed_)
+# 设置所有可用的CUDA设备的随机数生成器的种子。这将确保在使用CUDA加速时得到可重复的结果
+torch.cuda.manual_seed_all(_seed_)
+# 将CuDNN的随机性设置为确定性模式。这将确保在使用CuDNN加速时得到可
+torch.backends.cudnn.deterministic = True
+# 禁用CuDNN的自动寻找最佳卷积算法。这将确保在使用CuDNN加速时得到可重复的结果。
+torch.backends.cudnn.benchmark = False
+# 设置PyTorch进行CPU多线程并行计算时所占用的线程数，用来限制PyTorch所占用的CPU数目
+torch.set_num_threads(4)
 
 
 def test(args, model, x, y, task_id):
@@ -103,11 +111,9 @@ def main(args):
     # 使用 CUDA
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
 
-    from FLcore.dataloader import cifar100 as cf100
     data, taskcla, inputsize = cf100.get(data_dir=args.data_dir, seed=_seed_)
 
     acc_matrix = np.zeros((10, 10))
-    criterion = torch.nn.CrossEntropyLoss()
 
     task_id = 0
     task_list = []

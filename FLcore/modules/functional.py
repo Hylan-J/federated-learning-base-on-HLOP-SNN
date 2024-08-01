@@ -48,12 +48,12 @@ def spike_cluster(v: Tensor, v_threshold, T_in: int):
     :type v_threshold: float or tensor
     :param T_in: 脉冲聚类的距离阈值。一个脉冲聚类满足，内部任意2个相邻脉冲的距离不大于\ ``T_in``，而其内部任一脉冲与外部的脉冲距离大于\ ``T_in``。
     :return: 一个元组，包含
-    
+
         - **N_o** -- shape=[N]，N个神经元的输出脉冲的脉冲聚类的数量
 
         - **k_positive** -- shape=[N]，bool类型的tensor，索引。需要注意的是，k_positive可能是一个全False的tensor
 
-        - **k_negative** -- shape=[N]，bool类型的tensor，索引。需要注意的是，k_negative可能是一个全False的tensor 
+        - **k_negative** -- shape=[N]，bool类型的tensor，索引。需要注意的是，k_negative可能是一个全False的tensor
     :rtype: (Tensor, Tensor, Tensor)
 
     `STCA: Spatio-Temporal Credit Assignment with Delayed Feedback in Deep Spiking Neural Networks <https://www.ijcai.org/Proceedings/2019/0189.pdf>`_\ 一文提出的脉冲聚类方法。如果想使用该文中定义的损失，可以参考如下代码：
@@ -73,9 +73,9 @@ def spike_cluster(v: Tensor, v_threshold, T_in: int):
     :param v: shape=[T, N], membrane potentials of N neurons when t=[0, 1, ..., T-1]
     :param v_threshold: Threshold voltage(s) of the neurons, float or tensor of the shape=[N]
     :type v_threshold: float or tensor
-    :param T_in: Distance threshold of the spike clusters. A spike cluster satisfies that the distance of any two adjacent spikes within cluster is NOT greater than ``T_in`` and the distance between any internal and any external spike of cluster is greater than ``T_in``. 
+    :param T_in: Distance threshold of the spike clusters. A spike cluster satisfies that the distance of any two adjacent spikes within cluster is NOT greater than ``T_in`` and the distance between any internal and any external spike of cluster is greater than ``T_in``.
     :return: A tuple containing
-    
+
         - **N_o** -- shape=[N], numbers of spike clusters of N neurons' output spikes
 
         - **k_positive** -- shape=[N], tensor of type BoolTensor, indexes. Note that k_positive can be a tensor filled with False
@@ -292,7 +292,7 @@ def kernel_dot_product(x: Tensor, y: Tensor, kernel='linear', *args):
     * :ref:`API in English <kernel_dot_product-en>`
 
     .. _kernel_dot_product-cn:
-    
+
     :param x: shape=[N, M]的tensor，看作是N个M维向量
     :param y: shape=[N, M]的tensor，看作是N个M维向量
     :param str kernel: 计算内积时所使用的核函数
@@ -319,7 +319,7 @@ def kernel_dot_product(x: Tensor, y: Tensor, kernel='linear', *args):
     :param args: Extra parameters for inner product
     :return: ret, Tensor of shape=[N, N], ``ret[i][j]`` is inner product of ``x[i]`` and ``y[j]``.
 
-    Calculate inner product of ``x`` and ``y`` in kernel space. These 2 M-dim tensors are denoted by :math:`\\boldsymbol{x_{i}}` and :math:`\\boldsymbol{y_{j}}`. ``kernel`` determine the kind of inner product: 
+    Calculate inner product of ``x`` and ``y`` in kernel space. These 2 M-dim tensors are denoted by :math:`\\boldsymbol{x_{i}}` and :math:`\\boldsymbol{y_{j}}`. ``kernel`` determine the kind of inner product:
 
     - 'linear' -- Linear kernel, :math:`\\kappa(\\boldsymbol{x_{i}}, \\boldsymbol{y_{j}}) = \\boldsymbol{x_{i}}^{T}\\boldsymbol{y_{j}}`.
 
@@ -384,7 +384,7 @@ def set_threshold_margin(output_layer: neuron.BaseNode, label_one_hot: Tensor,
     Set voltage threshold margin for neurons in the output layer to reach better performance in classification task.
 
     When there are C different classes, the output layer contains C neurons. During training, when the input with groundtruth label i are sent into the network, the voltage threshold of the i-th neurons in the output layer will be set to ``threshold1`` and the remaining will be set to ``threshold0``.
-    
+
     During inference, the voltage thresholds of **ALL** neurons in the output layer will be set to ``eval_threshold``.
     '''
     if output_layer.training:
@@ -427,7 +427,7 @@ def redundant_one_hot(labels: Tensor, num_classes: int, n: int):
 
     .. _redundant_one_hot-en:
 
-    :param labels: Tensor of shape=[batch_size], ``batch_size`` labels 
+    :param labels: Tensor of shape=[batch_size], ``batch_size`` labels
     :param int num_classes: The total number of classes.
     :param int n: The encoding length for each class.
     :return: Tensor of shape=[batch_size, num_classes * n]

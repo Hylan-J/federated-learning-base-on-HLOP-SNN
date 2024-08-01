@@ -6,10 +6,11 @@ import torch
 import torch.nn.functional as F
 
 from torch.utils.tensorboard import SummaryWriter
-import models
+import FLcore.models
 import argparse
 import math
-from utils import Bar, AverageMeter, accuracy
+from FLcore.utils import Bar, accuracy
+from FLcore.meter import AverageMeter
 
 _seed_ = 2022
 import random
@@ -230,7 +231,7 @@ def main():
             hlop_with_wfr = False
 
         if task_id == 0:
-            model = models.spiking_resnet18(snn_setting, num_classes=ncla, nf=20, ss=args.sign_symmetric, hlop_with_wfr=hlop_with_wfr, hlop_spiking=args.hlop_spiking, hlop_spiking_scale=args.hlop_spiking_scale, hlop_spiking_timesteps=args.hlop_spiking_timesteps, proj_type=args.hlop_proj_type, share_classifier=True)
+            model = FLcore.models.spiking_resnet18(snn_setting, num_classes=ncla, nf=20, ss=args.sign_symmetric, hlop_with_wfr=hlop_with_wfr, hlop_spiking=args.hlop_spiking, hlop_spiking_scale=args.hlop_spiking_scale, hlop_spiking_timesteps=args.hlop_spiking_timesteps, proj_type=args.hlop_proj_type, share_classifier=True)
             model.add_hlop_subspace(hlop_out_num)
             model = model.cuda()
         else:
@@ -456,9 +457,9 @@ def main():
                 jj +=1
             print('Accuracies =')
             for i_a in range(task_id+1):
-                print('\t',end='')
+                print('\t', end='')
                 for j_a in range(acc_matrix.shape[1]):
-                    print('{:5.1f}% '.format(acc_matrix[i_a,j_a]*100),end='')
+                    print('{:5.1f}% '.format(acc_matrix[i_a,j_a]*100), end='')
                 print()
 
         # save model
