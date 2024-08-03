@@ -43,18 +43,18 @@ def main(args):
 
     data, taskcla, inputsize = cf100.get(data_dir=args.data_dir, seed=_seed_)
 
-    xtrain, ytrain, xtest, ytest = {}, {}, {}, {}
+    task_names = {}  # 任务的名称
+    xtrain, ytrain = {}, {}  # 训练集
+    xtest, ytest = {}, {}  # 测试集
 
     for task_id, ncla in taskcla:
+        task_names[task_id] = data[task_id]['name']
         xtrain[task_id] = data[task_id]['train']['x']
         ytrain[task_id] = data[task_id]['train']['y']
         xtest[task_id] = data[task_id]['test']['x']
         ytest[task_id] = data[task_id]['test']['y']
 
     acc_matrix = np.zeros((10, 10))
-
-    task_count = 0
-    task_list = []
 
     hlop_out_num = [6, 100, 200]
     hlop_out_num_inc = [2, 20, 40]
@@ -73,29 +73,49 @@ def main(args):
     if not os.path.exists(root_dir):
         os.makedirs(root_dir)
 
-    hlop_with_wfr = True
-    if args.not_hlop_with_wfr:
-        hlop_with_wfr = False
-
     # 生成服务器
     server = Server()
     # 服务器配置测试数据
-    server.configure_testset_info(xtest, ytest)
+    server.configure_testset(xtest, ytest)
     server.configure_data_save_path(root_dir)
 
     # 生成客户端
     clients = []
-    for i in range(1):
+    for i in range(args.num_clients):
         client = Client(i)
-        client.configure_trainset_info(xtrain, ytrain)
+        client.configure_trainset(xtrain, ytrain)
         client.configure_data_save_path(root_dir, args)
         clients.append(client)
 
+    task_count = 0
+    task_list = []
+
     for task_id, ncla in taskcla:
         print('*' * 100)
-        print('Task {:2d} ({:s})'.format(task_id, data[task_id]['name']))
+        print('Task {:2d} ({:s})'.format(task_id, task_names[task_id]))
         print('*' * 100)
         task_list.append(task_id)
+
+        writer = SummaryWriter(os.path.join(root_dir, 'logs_task{task_id}'.format(task_id=task_id)))
+
+        if args.replay:
+            for client in clients:
+                client.replay_xtrain[task_id], client.replay_ytrain[task_id] = [], []
+                for c in range(ncla):
+                    num = args.memory_size
+                    index = 0
+                    while num > 0:
+                        if ytrain[index] == c:
+                            client.replay_xtrain[task_id].append(xtrain[index])
+                            client.replay_ytrain[task_id].append(ytrain[index])
+                            num -= 1
+                        index += 1
+                client.replay_xtrain[task_id] = torch.stack(client.replay_xtrain[task_id], dim=0)
+                client.replay_ytrain[task_id] = torch.stack(client.replay_ytrain[task_id], dim=0)
+
+        hlop_with_wfr = True
+        if args.not_hlop_with_wfr:
+            hlop_with_wfr = False
 
         if task_count == 0:
             model = models.spiking_cnn(snn_setting, num_classes=ncla, ss=args.sign_symmetric,
@@ -119,18 +139,60 @@ def main(args):
             server.global_model.add_classifier(ncla)
             server.global_model.add_hlop_subspace(hlop_out_num_inc)
 
-        # 客户端训练
         for client in clients:
-            client.train(task_id, ncla, args, False, False)
-        # FedAvg算法聚合
-        server.update_model_weight(FedAvg([client.commit_model_weight() for client in clients]))
-        # 服务器测试
-        server.evaluate(task_id, task_count, args, False, False)
+            # 配置优化器 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            params = []
+            for name, p in client.local_model.named_parameters():
+                if 'hlop' not in name:
+                    if task_id != 0:
+                        if len(p.size()) != 1:
+                            params.append(p)
+                    else:
+                        params.append(p)
+            if args.opt == 'SGD':
+                client.optimizer = torch.optim.SGD(params, lr=args.lr, momentum=args.momentum)
+            elif args.opt == 'Adam':
+                client.optimizer = torch.optim.Adam(params, lr=args.lr)
+            else:
+                raise NotImplementedError(args.opt)
+            # 配置优化器 <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+            # 配置学习率调节器 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            if args.lr_scheduler == 'StepLR':
+                client.lr_scheduler = torch.optim.lr_scheduler.StepLR(client.optimizer, step_size=args.step_size, gamma=args.gamma)
+            elif args.lr_scheduler == 'CosALR':
+                # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.T_max)
+                lr_lambda = lambda cur_epoch: (cur_epoch + 1) / args.warmup if cur_epoch < args.warmup else 0.5 * (
+                        1 + math.cos((cur_epoch - args.warmup) / (args.T_max - args.warmup) * math.pi))
+                client.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(client.optimizer, lr_lambda=lr_lambda)
+            else:
+                raise NotImplementedError(args.lr_scheduler)
+            # 配置学习率调节器 <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+        for global_epoch in range(args.global_epochs):
+            for local_epoch in range(1, args.local_epochs + 1):
+                start_time = time.time()
+
+                train_losses, train_acces = [], []
+                for client in clients:
+                    train_loss, train_acc = client.train_epoch(task_id, local_epoch, args, False, False)
+                    train_losses.append(train_loss)
+                    train_acces.append(train_acc)
+                    writer.add_scalar(f'client{client.id}-train_loss', train_loss, local_epoch)
+                    writer.add_scalar(f'client{client.id}-train_acc', train_acc, local_epoch)
+                # FedAvg算法聚合
+                server.update_model_weight(FedAvg([client.commit_model_weight() for client in clients]))
+                test_loss, test_acc = server.evaluate(task_id, args, False, False)
+                writer.add_scalar(f'server-test_loss', test_loss, local_epoch)
+                writer.add_scalar(f'server-test_acc', test_acc, local_epoch)
+                total_time = time.time() - start_time
+                print(
+                    f'epoch={local_epoch}, train_loss={np.mean(train_losses)}, train_acc={np.mean(train_acces)}, test_loss={test_loss}, test_acc={test_acc}, total_time={total_time}, escape_time={(datetime.datetime.now() + datetime.timedelta(seconds=total_time * (args.local_epochs - local_epoch))).strftime("%Y-%m-%d %H:%M:%S")}')
 
         # save accuracy
         jj = 0
         for ii in np.array(task_list)[0:task_count + 1]:
-            _, acc_matrix[task_count, jj] = server.evaluate(ii, task_count, args, False, False)
+            _, acc_matrix[task_count, jj] = server.evaluate(ii, args, False, False)
             jj += 1
         print('Accuracies =')
         for i_a in range(task_count + 1):
@@ -142,6 +204,54 @@ def main(args):
         for client in clients:
             client.local_model.merge_hlop_subspace()
         server.global_model.merge_hlop_subspace()
+
+        # 如果重放并且起码参与了一个任务
+        if args.replay and task_count >= 1:
+            print('memory replay\n')
+            for client in clients:
+                # 配置重放优化器 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                params = []
+                for name, p in client.local_model.named_parameters():
+                    if 'hlop' not in name:
+                        if task_id != 0:
+                            if len(p.size()) != 1:
+                                params.append(p)
+                        else:
+                            params.append(p)
+                if args.opt == 'SGD':
+                    client.optimizer = torch.optim.SGD(params, lr=args.replay_lr, momentum=args.momentum)
+                elif args.opt == 'Adam':
+                    client.optimizer = torch.optim.Adam(params, lr=args.replay_lr)
+                else:
+                    raise NotImplementedError(args.opt)
+                # 配置优化器 <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+                # 配置重放学习率调节器 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+                if args.lr_scheduler == 'StepLR':
+                    client.lr_scheduler = torch.optim.lr_scheduler.StepLR(client.optimizer, step_size=args.step_size,
+                                                                   gamma=args.gamma)
+                elif args.lr_scheduler == 'CosALR':
+                    client.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(client.optimizer, T_max=args.replay_T_max)
+                else:
+                    raise NotImplementedError(args.lr_scheduler)
+                # 配置重放学习率调节器 <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+            for replay_epoch in range(1, args.replay_epochs + 1):
+                for client in clients:
+                    client.replay_train_epoch(task_id, args)
+                # FedAvg算法聚合
+                server.update_model_weight(FedAvg([client.commit_model_weight() for client in clients]))
+            # 保存准确率
+            jj = 0
+            for ii in np.array(task_list)[0:task_count + 1]:
+                _, acc_matrix[task_count, jj] = server.evaluate(ii, args, False, False)
+                jj += 1
+            print('Accuracies =')
+            for i_a in range(task_count + 1):
+                print('\t', end='')
+                for j_a in range(acc_matrix.shape[1]):
+                    print('{:5.1f}% '.format(acc_matrix[i_a, j_a] * 100), end='')
+                print()
 
         # update task id
         task_count += 1
@@ -214,6 +324,8 @@ if __name__ == '__main__':
     parser.add_argument('-hlop_spiking', action='store_true', help='use hlop with lateral spiking neurons')
     parser.add_argument('-hlop_spiking_scale', default=20., type=float)
     parser.add_argument('-hlop_spiking_timesteps', default=1000., type=float)
+
+    parser.add_argument('-num_clients', default=3, type=int, help='number of clients')
 
     args = parser.parse_args()
     main(args)

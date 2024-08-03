@@ -25,6 +25,8 @@ class Client:
         self.replay_xtrain = {}  # 客户端重放数据集
         self.replay_ytrain = {}
         self.tasks = []  # 客户端数据集允许进行的任务
+        self.xtrain_epoch = None
+        self.ytrain_epoch = None
 
         self.save_dir = None
         self.logs_dir = None  # 日志文件夹
@@ -38,7 +40,7 @@ class Client:
         self.local_epochs = None
         self.lr_scheduler = None
 
-    def configure_trainset_info(self, xtrain, ytrain):
+    def configure_trainset(self, xtrain, ytrain):
         """
         配置客户端的私有数据相关信息
         @param data:
@@ -80,43 +82,7 @@ class Client:
         @param model:
         @return:
         """
-        self.local_model = model
-
-    def configure_opt(self, opt, init_lr):
-        """
-        配置优化器
-        @param opt:
-        @param init_lr:
-        @return:
-        """
-        if opt == 'SGD':
-            self.optimizer = torch.optim.SGD(self.local_model.parameters(), lr=init_lr)
-        elif opt == 'Adam':
-            self.optimizer = torch.optim.Adam(self.local_model.parameters(), lr=init_lr)
-        else:
-            raise NotImplementedError(opt)
-
-    def configure_lr_scheduler(self, lr_scheduler, step_size, gamma, warmup, T_max, reply):
-        """
-        配置学习率
-        @param lr_scheduler:
-        @param step_size:
-        @param gamma:
-        @param warmup:
-        @param T_max:
-        @return:
-        """
-        if lr_scheduler == 'StepLR':
-            self.lr_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=step_size, gamma=gamma)
-        elif lr_scheduler == 'CosALR':
-            if reply:
-                self.lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=T_max)
-            else:
-                lr_lambda = lambda cur_epoch: (cur_epoch + 1) / warmup if cur_epoch < warmup else 0.5 * (
-                        1 + math.cos((cur_epoch - warmup) / (T_max - warmup) * math.pi))
-                self.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lr_lambda)
-        else:
-            raise NotImplementedError(lr_scheduler)
+        self.local_model = copy.deepcopy(model)
 
     def train(self, task_id, ncla, args, is_bptt, is_ottt):
         """
@@ -146,203 +112,236 @@ class Client:
             self.replay_xtrain[task_id] = torch.stack(self.replay_xtrain[task_id], dim=0)
             self.replay_ytrain[task_id] = torch.stack(self.replay_ytrain[task_id], dim=0)
 
-        for local_epoch in range(1, args.local_epochs + 1):
-            start_time = time.time()
+    def train_epoch(self, task_id, local_epoch, args, is_bptt, is_ottt):
+        self.xtrain_epoch = self.xtrain[task_id]
+        self.ytrain_epoch = self.ytrain[task_id]
 
-            self.local_model.train()
+        self.local_model.train()  # 开启模型训练模式
 
-            if task_id != 0:
-                self.local_model.fix_bn()
+        if task_id != 0:
+            self.local_model.fix_bn()
 
-            batch_time = AverageMeter()
-            data_time = AverageMeter()
-            losses = AverageMeter()
-            top1 = AverageMeter()
-            top5 = AverageMeter()
-            end = time.time()
+        batch_time = AverageMeter()
+        data_time = AverageMeter()
+        losses = AverageMeter()
+        top1 = AverageMeter()
+        top5 = AverageMeter()
+        end = time.time()
 
-            bar = Bar('Client {:3d}'.format(self.id), max=((xtrain.size(0) - 1) // args.b + 1))
+        bar = Bar('Client {:3d}'.format(self.id), max=((self.xtrain_epoch.size(0) - 1) // args.b + 1))
 
-            train_loss = 0
-            train_acc = 0
-            train_samples = 0
-            batch_idx = 0
+        train_loss = 0
+        train_acc = 0
+        train_samples = 0
+        batch_idx = 0
 
-            r = np.arange(xtrain.size(0))
-            np.random.shuffle(r)
-            for i in range(0, len(r), args.b):
-                if i + args.b <= len(r):
-                    index = r[i: i + args.b]
-                else:
-                    index = r[i:]
-                batch_idx += 1
-                x = xtrain[index].float().cuda()
-                label = ytrain[index].cuda()
+        r = np.arange(self.xtrain_epoch.size(0))
+        np.random.shuffle(r)
+        for i in range(0, len(r), args.b):
+            if i + args.b <= len(r):
+                index = r[i: i + args.b]
+            else:
+                index = r[i:]
+            batch_idx += 1
+            x = self.xtrain_epoch[index].float().cuda()
+            label = self.ytrain_epoch[index].cuda()
 
-                if not is_ottt:
-                    # repeat for time steps
-                    x = x.unsqueeze(1)
-                    x = x.repeat(1, args.timesteps, 1, 1, 1)
-
+            if is_ottt:
+                total_loss = 0.
+                if not args.online_update:
                     self.optimizer.zero_grad()
-
-                    if task_id == 0:
-                        if args.baseline:
-                            out = self.local_model(x, task_id, projection=False, update_hlop=False)
-                        else:
-                            if local_epoch <= args.hlop_start_epochs:
-                                out = self.local_model(x, task_id, projection=False, update_hlop=False)
-                            else:
-                                out = self.local_model(x, task_id, projection=False, update_hlop=True)
-                    else:
-                        if args.baseline:
-                            out = self.local_model(x, task_id, projection=False, proj_id_list=[0], update_hlop=False,
-                                                   fix_subspace_id_list=[0])
-                        else:
-                            if local_epoch <= args.hlop_start_epochs:
-                                out = self.local_model(x, task_id, projection=True, proj_id_list=[0], update_hlop=False,
-                                                       fix_subspace_id_list=[0])
-                            else:
-                                out = self.local_model(x, task_id, projection=True, proj_id_list=[0], update_hlop=True,
-                                                       fix_subspace_id_list=[0])
-                        loss = F.cross_entropy(out, label)
-                        loss.backward()
-                        self.optimizer.step()
-
-                        if is_bptt:
-                            self.reset_net(self.local_model)
-                else:
-                    total_loss = 0.
-                    if not args.online_update:
+                for t in range(args.timesteps):
+                    if args.online_update:
                         self.optimizer.zero_grad()
-                    for t in range(args.timesteps):
-                        if args.online_update:
-                            self.optimizer.zero_grad()
-                        init = (t == 0)
-                        if task_id == 0:
-                            if args.baseline:
-                                out_fr = self.local_model(x, task_id, projection=False, update_hlop=False, init=init)
-                            else:
-                                if local_epoch <= args.hlop_start_epochs:
-                                    out_fr = self.local_model(x, task_id, projection=False, update_hlop=False,
-                                                              init=init)
-                                else:
-                                    out_fr = self.local_model(x, task_id, projection=False, update_hlop=True, init=init)
+                    init = (t == 0)
+                    if task_id == 0:
+                        """原始代码
+                        if args.baseline:
+                            out_fr = self.local_model(x, task_id, projection=False, update_hlop=False, init=init)
                         else:
-                            if args.baseline:
-                                out_fr = self.local_model(x, task_id, projection=False, proj_id_list=[0],
+                            if local_epoch <= args.hlop_start_epochs:
+                                out_fr = self.local_model(x, task_id, projection=False, update_hlop=False,
+                                                          init=init)
+                            else:
+                                out_fr = self.local_model(x, task_id, projection=False, update_hlop=True, init=init)
+                        """
+                        flag = not (args.baseline and (local_epoch <= args.hlop_start_epochs))
+                        out_fr = self.local_model(x, task_id, projection=False, update_hlop=flag, init=init)
+                    else:
+                        """原始代码
+                        if args.baseline:
+                            out_fr = self.local_model(x, task_id, projection=False, proj_id_list=[0],
+                                                      update_hlop=False,
+                                                      fix_subspace_id_list=[0], init=init)
+                        else:
+                            if local_epoch <= args.hlop_start_epochs:
+                                out_fr = self.local_model(x, task_id, projection=True, proj_id_list=[0],
                                                           update_hlop=False,
                                                           fix_subspace_id_list=[0], init=init)
                             else:
-                                if local_epoch <= args.hlop_start_epochs:
-                                    out_fr = self.local_model(x, task_id, projection=True, proj_id_list=[0],
-                                                              update_hlop=False,
-                                                              fix_subspace_id_list=[0], init=init)
-                                else:
-                                    out_fr = self.local_model(x, task_id, projection=True, proj_id_list=[0],
-                                                              update_hlop=True,
-                                                              fix_subspace_id_list=[0], init=init)
-                        if t == 0:
-                            total_fr = out_fr.clone().detach()
-                        else:
-                            total_fr += out_fr.clone().detach()
-                        loss = F.cross_entropy(out_fr, label) / args.timesteps
-                        loss.backward()
-                        total_loss += loss.detach()
-                        if args.online_update:
-                            self.optimizer.step()
-                    if not args.online_update:
+                                out_fr = self.local_model(x, task_id, projection=True, proj_id_list=[0],
+                                                          update_hlop=True,
+                                                          fix_subspace_id_list=[0], init=init)
+                        """
+                        flag = not (args.baseline or (local_epoch <= args.hlop_start_epochs))
+                        out_fr = self.local_model(x, task_id, projection=not args.baseline, proj_id_list=[0],
+                                                  update_hlop=flag,
+                                                  fix_subspace_id_list=[0], init=init)
+                    if t == 0:
+                        total_fr = out_fr.clone().detach()
+                    else:
+                        total_fr += out_fr.clone().detach()
+                    loss = F.cross_entropy(out_fr, label) / args.timesteps
+                    loss.backward()
+                    total_loss += loss.detach()
+                    if args.online_update:
                         self.optimizer.step()
+                if not args.online_update:
+                    self.optimizer.step()
 
-                    out = total_fr
+                train_loss += total_loss.item() * label.numel()
+                out = total_fr
+            elif is_bptt:
+                self.optimizer.zero_grad()
+                if task_id == 0:
+                    """原始代码
+                    if args.baseline:
+                        out = self.local_model(x, task_id, projection=False, update_hlop=False)
+                    else:
+                        if local_epoch <= args.hlop_start_epochs:
+                            out = self.local_model(x, task_id, projection=False, update_hlop=False)
+                        else:
+                            out = self.local_model(x, task_id, projection=False, update_hlop=True)
+                    """
+                    flag = not (args.baseline and (local_epoch <= args.hlop_start_epochs))
+                    out = self.local_model(x, task_id, projection=False, update_hlop=flag)
+                else:
+                    """原始代码
+                    if args.baseline:
+                        out = self.local_model(x, task_id, projection=False, proj_id_list=[0], update_hlop=False,
+                                    fix_subspace_id_list=[0])
+                    else:
+                        if local_epoch <= args.hlop_start_epochs:
+                            out = self.local_model(x, task_id, projection=True, proj_id_list=[0], update_hlop=False,
+                                        fix_subspace_id_list=[0])
+                        else:
+                            out = self.local_model(x, task_id, projection=True, proj_id_list=[0], update_hlop=True,
+                                        fix_subspace_id_list=[0])
+                    """
+                    flag = not (args.baseline or (local_epoch <= args.hlop_start_epochs))
+                    out = self.local_model(x, task_id, projection=not args.baseline, proj_id_list=[0],
+                                           update_hlop=flag, fix_subspace_id_list=[0])
+                loss = F.cross_entropy(out, label)
+                loss.backward()
+                self.optimizer.step()
+                self.reset_net(self.local_model)
+                train_loss += loss.item() * label.numel()
+            else:
+                x = x.unsqueeze(1)
+                x = x.repeat(1, args.timesteps, 1, 1, 1)
+                self.optimizer.zero_grad()
 
+                if task_id == 0:
+                    """原始代码
+                    if args.baseline:
+                        out = model(x, task_id, projection=False, update_hlop=False)
+                    else:
+                        if epoch <= args.hlop_start_epochs:
+                            out = model(x, task_id, projection=False, update_hlop=False)
+                        else:
+                            out = model(x, task_id, projection=False, update_hlop=True)
+                    """
+                    flag = not (args.baseline and (local_epoch <= args.hlop_start_epochs))
+                    out = self.local_model(x, task_id, projection=False, update_hlop=flag)
+
+                else:
+                    """原始代码
+                    if args.baseline:
+                        out = self.local_model(x, task_id, projection=False, proj_id_list=[0], update_hlop=False,
+                                               fix_subspace_id_list=[0])
+                    else:
+                        if local_epoch <= args.hlop_start_epochs:
+                            out = self.local_model(x, task_id, projection=True, proj_id_list=[0], update_hlop=False,
+                                                   fix_subspace_id_list=[0])
+                        else:
+                            out = self.local_model(x, task_id, projection=True, proj_id_list=[0], update_hlop=True,
+                                                   fix_subspace_id_list=[0])
+                    """
+                    flag = not (args.baseline or (local_epoch <= args.hlop_start_epochs))
+                    out = self.local_model(x, task_id, projection=not args.baseline, proj_id_list=[0], update_hlop=flag,
+                                           fix_subspace_id_list=[0])
+                loss = F.cross_entropy(out, label)
+                loss.backward()
+                self.optimizer.step()
                 train_loss += loss.item() * label.numel()
 
-                # measure accuracy and record loss
-                prec1, prec5 = accuracy(out.data, label.data, topk=(1, 5))
-                losses.update(loss, x.size(0))
-                top1.update(prec1.item(), x.size(0))
-                top5.update(prec5.item(), x.size(0))
+            # measure accuracy and record loss
+            prec1, prec5 = accuracy(out.data, label.data, topk=(1, 5))
+            losses.update(loss, x.size(0))
+            top1.update(prec1.item(), x.size(0))
+            top5.update(prec5.item(), x.size(0))
 
-                train_samples += label.numel()
-                train_acc += (out.argmax(1) == label).float().sum().item()
+            train_samples += label.numel()
+            train_acc += (out.argmax(1) == label).float().sum().item()
 
-                # measure elapsed time
-                batch_time.update(time.time() - end)
-                end = time.time()
+            # measure elapsed time
+            batch_time.update(time.time() - end)
+            end = time.time()
 
-                # plot progress
-                bar.suffix = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
-                    batch=batch_idx,
-                    size=((xtrain.size(0) - 1) // args.b + 1),
-                    data=data_time.avg,
-                    bt=batch_time.avg,
-                    total=bar.elapsed_td,
-                    eta=bar.eta_td,
-                    loss=losses.avg,
-                    top1=top1.avg,
-                    top5=top5.avg,
-                )
-                bar.next()
-            bar.finish()
+            # plot progress
+            bar.suffix = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
+                batch=batch_idx,
+                size=((self.xtrain_epoch.size(0) - 1) // args.b + 1),
+                data=data_time.avg,
+                bt=batch_time.avg,
+                total=bar.elapsed_td,
+                eta=bar.eta_td,
+                loss=losses.avg,
+                top1=top1.avg,
+                top5=top5.avg,
+            )
+            bar.next()
+        bar.finish()
 
-            train_loss /= train_samples
-            train_acc /= train_samples
+        train_loss /= train_samples
+        train_acc /= train_samples
+        self.lr_scheduler.step()
 
-            writer.add_scalar('train_loss', train_loss, local_epoch)
-            writer.add_scalar('train_acc', train_acc, local_epoch)
+        return train_loss, train_acc
 
-            self.lr_scheduler.step()
+    def replay_train_epoch(self, task_id, args):
+        self.local_model.train()
+        self.local_model.fix_bn()
 
-            total_time = time.time() - start_time
-            print(
-                f'epoch={local_epoch}, train_loss={train_loss}, train_acc={train_acc}, total_time={total_time}, escape_time={(datetime.datetime.now() + datetime.timedelta(seconds=total_time * (args.local_epochs - local_epoch))).strftime("%Y-%m-%d %H:%M:%S")}')
+        batch_per_task = args.replay_b
+        task_data_num = self.replay_xtrain[0]['x'].size(0)
+        r = np.arange(task_data_num)
+        np.random.shuffle(r)
+        for i in range(0, task_data_num, batch_per_task):
+            self.optimizer.zero_grad()
+            for replay_task_id in range(task_id + 1):
+                xtrain = self.replay_xtrain[replay_task_id]['x']
+                ytrain = self.replay_xtrain[replay_task_id]['y']
 
-    def replay_train(self, task_id, ncla, args):
-        print('memory replay\n')
-        params = []
-        for name, param in self.local_model.named_parameters():
-            if 'hlop' not in name:
-                if len(param.size()) != 1:
-                    params.append(param)
+                if i + batch_per_task <= task_data_num:
+                    index = r[i: i + batch_per_task]
+                else:
+                    index = r[i:]
 
-        self.configure_opt(args.opt, args.replay_lr)
-        self.configure_lr_scheduler(args.lr_scheduler, args.step_size, args.gamma, args.warmup, args.replay_T_max,
-                                    args.replay)
+                x = xtrain[index].float().cuda()
 
-        for local_epoch in range(1, args.replay_epochs + 1):
-            self.local_model.train()
-            self.local_model.fix_bn()
+                # repeat for time steps
+                x = x.unsqueeze(1)
+                x = x.repeat(1, args.timesteps, 1, 1, 1)
 
-            batch_per_task = args.replay_b
-            task_data_num = self.replay_xtrain[0]['x'].size(0)
-            r = np.arange(task_data_num)
-            np.random.shuffle(r)
-            for i in range(0, task_data_num, batch_per_task):
-                self.optimizer.zero_grad()
-                for replay_task_id in range(task_id + 1):
-                    xtrain = self.replay_xtrain[replay_task_id]['x']
-                    ytrain = self.replay_xtrain[replay_task_id]['y']
+                label = ytrain[index].cuda()
 
-                    if i + batch_per_task <= task_data_num:
-                        index = r[i: i + batch_per_task]
-                    else:
-                        index = r[i:]
-
-                    x = xtrain[index].float().cuda()
-
-                    # repeat for time steps
-                    x = x.unsqueeze(1)
-                    x = x.repeat(1, args.timesteps, 1, 1, 1)
-
-                    label = ytrain[index].cuda()
-
-                    # out = model(x, replay_taskid, projection=False, update_hlop=True)
-                    out = self.local_model(x, replay_task_id, projection=False, update_hlop=False)
-                    loss = F.cross_entropy(out, label)
-                    loss.backward()
-                self.optimizer.step()
-            self.lr_scheduler.step()
+                # out = model(x, replay_taskid, projection=False, update_hlop=True)
+                out = self.local_model(x, replay_task_id, projection=False, update_hlop=False)
+                loss = F.cross_entropy(out, label)
+                loss.backward()
+            self.optimizer.step()
+        self.lr_scheduler.step()
 
     def commit_model_weight(self):
         return self.local_model.state_dict()

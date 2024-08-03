@@ -21,7 +21,7 @@ class Server:
         self.tasks = None  # 数据集中拥有的任务
         self.save_dir = None  # 存储的目录
 
-    def configure_testset_info(self, xtest, ytest):
+    def configure_testset(self, xtest, ytest):
         """
         配置服务器的测试数据集信息
         @param xtest:
@@ -33,13 +33,12 @@ class Server:
         self.tasks = list(self.xtest.keys())
 
     def configure_global_model(self, global_model):
-        self.global_model = global_model
+        self.global_model = copy.deepcopy(global_model)
 
     def configure_data_save_path(self, save_dir):
         self.save_dir = save_dir
 
-    def evaluate(self, task_id, global_epoch, args, is_bptt, is_ottt):
-        writer = SummaryWriter(os.path.join(self.save_dir, "logs_task{task_id}".format(task_id=task_id)))
+    def evaluate(self, task_id, args, is_bptt, is_ottt):
         self.global_model.eval()
 
         batch_time = AverageMeter()
@@ -54,7 +53,6 @@ class Server:
         test_acc = 0
         test_loss = 0
         test_samples = 0
-
         batch_idx = 0
 
         r = np.arange(self.xtest[task_id].size(0))
@@ -65,26 +63,14 @@ class Server:
                 else:
                     index = r[i:]
                 batch_idx += 1
+                input = self.xtest[task_id][index].float().cuda()
+                label = self.ytest[task_id][index].cuda()
 
-                if not is_ottt:
-                    input = self.xtest[task_id][index].float().cuda()
-
-                    # repeat for time steps
-                    input = input.unsqueeze(1)
-                    input = input.repeat(1, args.timesteps, 1, 1, 1)
-
-                    label = self.ytest[task_id][index].cuda()
-
+                if is_bptt:
                     out = self.global_model(input, task_id, projection=False, update_hlop=False)
                     loss = F.cross_entropy(out, label)
-
-                    if is_bptt:
-                        self.reset_net(self.global_model)
-                else:
-                    input = self.xtest[index].float().cuda()
-
-                    label = self.ytest[index].cuda()
-
+                    self.reset_net(self.global_model)
+                elif is_ottt:
                     loss = 0.
                     for t in range(args.timesteps):
                         if t == 0:
@@ -95,6 +81,12 @@ class Server:
                             total_fr += out_fr.clone().detach()
                         loss += F.cross_entropy(out_fr, label).detach() / args.timesteps
                     out = total_fr
+                else:
+                    # repeat for time steps
+                    input = input.unsqueeze(1)
+                    input = input.repeat(1, args.timesteps, 1, 1, 1)
+                    out = self.global_model(input, task_id, projection=False, update_hlop=False)
+                    loss = F.cross_entropy(out, label)
 
                 test_samples += label.numel()
                 test_loss += loss.item() * label.numel()
@@ -127,9 +119,7 @@ class Server:
 
         test_acc /= test_samples
         test_loss /= test_samples
-        writer.add_scalar('test_loss', test_loss, global_epoch)
-        writer.add_scalar('test_acc', test_acc, global_epoch)
-        return test_acc, test_loss
+        return test_loss, test_acc
 
     def update_model_weight(self, weight):
         self.global_model.load_state_dict(weight)

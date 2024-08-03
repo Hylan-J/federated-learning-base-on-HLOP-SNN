@@ -18,8 +18,6 @@ from FLcore.dataloader import pmnist as pmd
 from FLcore.server import Server
 from FLcore.utils import Bar, accuracy
 from FLcore.meter import AverageMeter
-# from FLcore.modules import functional
-
 
 # 随机数种子
 _seed_ = 2022
@@ -44,9 +42,12 @@ def main(args):
 
     data, taskcla, inputsize = pmd.get(data_dir=args.data_dir, seed=_seed_)
 
-    xtrain, ytrain, xtest, ytest = {}, {}, {}, {}
+    task_names = {}  # 任务的名称
+    xtrain, ytrain = {}, {}  # 训练集
+    xtest, ytest = {}, {}  # 测试集
 
     for task_id, ncla in taskcla:
+        task_names[task_id] = data[task_id]['name']
         xtrain[task_id] = data[task_id]['train']['x']
         ytrain[task_id] = data[task_id]['train']['y']
         xtest[task_id] = data[task_id]['test']['x']
@@ -58,31 +59,48 @@ def main(args):
     if not os.path.exists(root_dir):
         os.makedirs(root_dir)
 
-    task_count = 0
-    task_list = []
-
     hlop_out_num = [80, 200, 100]
     hlop_out_num_inc = [70, 70, 70]
 
     # 生成服务器
     server = Server()
     # 服务器配置测试数据
-    server.configure_testset_info(xtest, ytest)
+    server.configure_testset(xtest, ytest)
     server.configure_data_save_path(root_dir)
 
     # 生成客户端
     clients = []
-    for i in range(3):
+    for i in range(args.num_clients):
         client = Client(i)
-        client.configure_trainset_info(xtrain, ytrain)
+        client.configure_trainset(xtrain, ytrain)
         client.configure_data_save_path(root_dir, args)
         clients.append(client)
 
+    task_count = 0
+    task_list = []
+
     for task_id, ncla in taskcla:
         print('*' * 100)
-        print('Task {:2d} ({:s})'.format(task_id, data[task_id]['name']))
+        print('Task {:2d} ({:s})'.format(task_id, task_names[task_id]))
         print('*' * 100)
         task_list.append(task_id)
+
+        writer = SummaryWriter(os.path.join(root_dir, 'logs_task{task_id}'.format(task_id=task_id)))
+
+        if args.replay:
+            for client in clients:
+                client.replay_xtrain[task_id], client.replay_ytrain[task_id] = [], []
+                for c in range(ncla):
+                    num = args.memory_size
+                    index = 0
+                    while num > 0:
+                        if ytrain[index] == c:
+                            client.replay_xtrain[task_id].append(xtrain[index])
+                            client.replay_ytrain[task_id].append(ytrain[index])
+                            num -= 1
+                        index += 1
+                client.replay_xtrain[task_id] = torch.stack(client.replay_xtrain[task_id], dim=0)
+                client.replay_ytrain[task_id] = torch.stack(client.replay_ytrain[task_id], dim=0)
 
         if task_id == 0:
             model = models.spiking_MLP_bptt(num_classes=ncla, n_hidden=800, ss=args.sign_symmetric,
@@ -107,19 +125,61 @@ def main(args):
                 client.local_model.add_hlop_subspace(hlop_out_num_inc)
             server.global_model.add_hlop_subspace(hlop_out_num_inc)
 
-        # 客户端训练
         for client in clients:
-            client.train(task_id, ncla, args, True, False)
+            # 配置优化器 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            params = []
+            for name, p in client.local_model.named_parameters():
+                if 'hlop' not in name:
+                    if task_id != 0:
+                        if len(p.size()) != 1:
+                            params.append(p)
+                    else:
+                        params.append(p)
+            if args.opt == 'SGD':
+                client.optimizer = torch.optim.SGD(params, lr=args.lr)
+            elif args.opt == 'Adam':
+                client.optimizer = torch.optim.Adam(params, lr=args.lr)
+            else:
+                raise NotImplementedError(args.opt)
+            # 配置优化器 <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
-        # FedAvg算法聚合
-        server.update_model_weight(FedAvg([client.commit_model_weight() for client in clients]))
-        # 服务器测试
-        server.evaluate(task_id, task_count, args, True, False)
+            # 配置学习率调节器 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+            if args.lr_scheduler == 'StepLR':
+                client.lr_scheduler = torch.optim.lr_scheduler.StepLR(client.optimizer, step_size=args.step_size, gamma=args.gamma)
+            elif args.lr_scheduler == 'CosALR':
+                # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.T_max)
+                lr_lambda = lambda cur_epoch: (cur_epoch + 1) / args.warmup if cur_epoch < args.warmup else 0.5 * (
+                        1 + math.cos((cur_epoch - args.warmup) / (args.T_max - args.warmup) * math.pi))
+                client.lr_scheduler = torch.optim.lr_scheduler.LambdaLR(client.optimizer, lr_lambda=lr_lambda)
+            else:
+                raise NotImplementedError(args.lr_scheduler)
+            # 配置学习率调节器 <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+        for global_epoch in range(args.global_epochs):
+            for local_epoch in range(1, args.local_epochs + 1):
+                start_time = time.time()
+
+                train_losses, train_acces = [], []
+                for client in clients:
+                    train_loss, train_acc = client.train_epoch(task_id, local_epoch, args, True, False)
+                    train_losses.append(train_loss)
+                    train_acces.append(train_acc)
+                    writer.add_scalar(f'client{client.id}-train_loss', train_loss, local_epoch)
+                    writer.add_scalar(f'client{client.id}-train_acc', train_acc, local_epoch)
+
+                # FedAvg算法聚合
+                server.update_model_weight(FedAvg([client.commit_model_weight() for client in clients]))
+                test_loss, test_acc = server.evaluate(task_id, args, True, False)
+                writer.add_scalar(f'server-test_loss', test_loss, local_epoch)
+                writer.add_scalar(f'server-test_acc', test_acc, local_epoch)
+                total_time = time.time() - start_time
+                print(
+                    f'epoch={local_epoch}, train_loss={np.mean(train_losses)}, train_acc={np.mean(train_acces)}, test_loss={test_loss}, test_acc={test_acc}, total_time={total_time}, escape_time={(datetime.datetime.now() + datetime.timedelta(seconds=total_time * (args.local_epochs - local_epoch))).strftime("%Y-%m-%d %H:%M:%S")}')
 
         # save accuracy
         jj = 0
         for ii in np.array(task_list)[0:task_id + 1]:
-            _, acc_matrix[task_id, jj] = server.evaluate(ii, task_count, args, True, False)
+            _, acc_matrix[task_id, jj] = server.evaluate(ii, args, True, False)
             jj += 1
         print('Accuracies =')
         for i_a in range(task_id + 1):
@@ -192,6 +252,6 @@ if __name__ == '__main__':
     parser.add_argument('-hlop_spiking', action='store_true', help='use hlop with lateral spiking neurons')
     parser.add_argument('-hlop_spiking_scale', default=20., type=float)
     parser.add_argument('-hlop_spiking_timesteps', default=1000., type=float)
-
+    parser.add_argument('-num_clients', default=3, type=int, help='number of clients')
     args = parser.parse_args()
     main(args)

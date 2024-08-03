@@ -1,39 +1,38 @@
 import datetime
 import os
 import time
-import torch
-from torch.utils.data import DataLoader
-
-import torch.nn as nn
-import torch.nn.functional as F
-
-from torch.utils.tensorboard import SummaryWriter
-import sys
-from torch.cuda import amp
-import FLcore.models
 import argparse
 import math
-from FLcore.utils import Bar, Logger, accuracy, mkdir_p, savefig
-from FLcore.meter import AverageMeter
-import torch.utils.data as data
-import torchvision.transforms as transforms
-import torchvision.datasets as datasets
-from copy import deepcopy
-
-_seed_ = 2022
 import random
 
-random.seed(_seed_)
-
-torch.manual_seed(_seed_)  # use torch.manual_seed() to seed the RNG for all devices (both CPU and CUDA)
-torch.cuda.manual_seed_all(_seed_)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
-
 import numpy as np
+import torch
+import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
 
+import FLcore.models
+from FLcore.aggregation import FedAvg
+from FLcore.client import Client
+from FLcore.server import Server
+from FLcore.utils import Bar, accuracy
+from FLcore.meter import AverageMeter
+from FLcore.dataloader import pmnist as pmd
+
+# 随机数种子
+_seed_ = 2022
+# 设置Python 的随机数生成器的种子。这将确保随机数生成器生成的随机序列是可预测的
+random.seed(_seed_)
+# 设置NumPy的随机数生成器的种子。这将确保在使用NumPy进行随机操作时得到可重复的结果
 np.random.seed(_seed_)
-
+# 设置PyTorch的随机数生成器的种子。这将确保在使用PyTorch进行随机操作时得到可重复的结果
+torch.random.manual_seed(_seed_)
+# 设置所有可用的CUDA设备的随机数生成器的种子。这将确保在使用CUDA加速时得到可重复的结果
+torch.cuda.manual_seed_all(_seed_)
+# 将CuDNN的随机性设置为确定性模式。这将确保在使用CuDNN加速时得到可
+torch.backends.cudnn.deterministic = True
+# 禁用CuDNN的自动寻找最佳卷积算法。这将确保在使用CuDNN加速时得到可重复的结果。
+torch.backends.cudnn.benchmark = False
+# 设置PyTorch进行CPU多线程并行计算时所占用的线程数，用来限制PyTorch所占用的CPU数目
 torch.set_num_threads(4)
 
 
@@ -107,62 +106,10 @@ def test(args, model, x, y, task_id):
     return test_loss, test_acc
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Classify PMNIST')
-    parser.add_argument('-b', default=64, type=int, help='batch size')
-    parser.add_argument('-epochs', default=1, type=int, metavar='N',
-                        help='number of total epochs to run')
-    parser.add_argument('-j', default=4, type=int, metavar='N',
-                        help='number of data loading workers (default: 4)')
-    parser.add_argument('-data_dir', type=str, default='./data')
-    parser.add_argument('-out_dir', type=str, help='root dir for saving logs and checkpoint', default='./logs')
-
-    parser.add_argument('-opt', type=str, help='use which optimizer. SGD or Adam', default='SGD')
-    parser.add_argument('-lr', default=0.1, type=float, help='learning rate')
-    parser.add_argument('-lr_scheduler', default='StepLR', type=str, help='use which schedule. StepLR or CosALR')
-    parser.add_argument('-step_size', default=100, type=float, help='step_size for StepLR')
-    parser.add_argument('-gamma', default=0.1, type=float, help='gamma for StepLR')
-    parser.add_argument('-T_max', default=200, type=int, help='T_max for CosineAnnealingLR')
-    parser.add_argument('-warmup', default=0, type=int, help='warmup epochs for learning rate')
-    parser.add_argument('-cnf', type=str)
-
-    parser.add_argument('-hlop_start_epochs', default=0, type=int, help='the start epoch to update hlop')
-
-    parser.add_argument('-sign_symmetric', action='store_true', help='sign symmetric')
-    parser.add_argument('-feedback_alignment', action='store_true', help='feedback alignment')
-
-    parser.add_argument('-baseline', action='store_true', help='baseline')
-
-    parser.add_argument('-replay', action='store_true', help='replay few-shot previous tasks')
-    parser.add_argument('-memory_size', default=50, type=int, help='memory size for replay')
-    parser.add_argument('-replay_epochs', default=1, type=int, help='epochs for replay')
-    parser.add_argument('-replay_b', default=50, type=int, help='batch size per task for replay')
-    parser.add_argument('-replay_lr', default=0.01, type=float, help='learning rate for replay')
-    parser.add_argument('-replay_T_max', default=20, type=int, help='T_max for CosineAnnealingLR for replay')
-
-    parser.add_argument('-gpu-id', default='0', type=str,
-                        help='id(s) for CUDA_VISIBLE_DEVICES')
-    # SNN settings
-    parser.add_argument('-timesteps', default=20, type=int)
-    parser.add_argument('-Vth', default=0.3, type=float)
-    parser.add_argument('-tau', default=1.0, type=float)
-    parser.add_argument('-delta_t', default=0.05, type=float)
-    parser.add_argument('-alpha', default=0.3, type=float)
-    parser.add_argument('-train_Vth', default=1, type=int)
-    parser.add_argument('-Vth_bound', default=0.0005, type=float)
-    parser.add_argument('-rate_stat', default=0, type=int)
-
-    parser.add_argument('-not_hlop_with_wfr', action='store_true', help='use spikes for hlop update')
-    parser.add_argument('-hlop_spiking', action='store_true', help='use hlop with lateral spiking neurons')
-    parser.add_argument('-hlop_spiking_scale', default=20., type=float)
-    parser.add_argument('-hlop_spiking_timesteps', default=1000., type=float)
-
-    args = parser.parse_args()
-
+def main(args):
     # Use CUDA
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu_id
 
-    from FLcore.dataloader import pmnist as pmd
     data, taskcla, inputsize = pmd.get(data_dir=args.data_dir, seed=_seed_)
 
     acc_matrix = np.zeros((10, 10))
@@ -270,7 +217,7 @@ def main():
         elif args.lr_scheduler == 'CosALR':
             # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.T_max)
             lr_lambda = lambda cur_epoch: (cur_epoch + 1) / args.warmup if cur_epoch < args.warmup else 0.5 * (
-                        1 + math.cos((cur_epoch - args.warmup) / (args.T_max - args.warmup) * math.pi))
+                    1 + math.cos((cur_epoch - args.warmup) / (args.T_max - args.warmup) * math.pi))
             lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
         else:
             raise NotImplementedError(args.lr_scheduler)
@@ -496,4 +443,55 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description='Classify PMNIST')
+    parser.add_argument('-b', default=64, type=int, help='batch size')
+    parser.add_argument('-epochs', default=1, type=int, metavar='N',
+                        help='number of total epochs to run')
+    parser.add_argument('-j', default=4, type=int, metavar='N',
+                        help='number of data loading workers (default: 4)')
+    parser.add_argument('-data_dir', type=str, default='./data')
+    parser.add_argument('-out_dir', type=str, help='root dir for saving logs and checkpoint', default='./logs')
+
+    parser.add_argument('-opt', type=str, help='use which optimizer. SGD or Adam', default='SGD')
+    parser.add_argument('-lr', default=0.1, type=float, help='learning rate')
+    parser.add_argument('-lr_scheduler', default='StepLR', type=str, help='use which schedule. StepLR or CosALR')
+    parser.add_argument('-step_size', default=100, type=float, help='step_size for StepLR')
+    parser.add_argument('-gamma', default=0.1, type=float, help='gamma for StepLR')
+    parser.add_argument('-T_max', default=200, type=int, help='T_max for CosineAnnealingLR')
+    parser.add_argument('-warmup', default=0, type=int, help='warmup epochs for learning rate')
+    parser.add_argument('-cnf', type=str)
+
+    parser.add_argument('-hlop_start_epochs', default=0, type=int, help='the start epoch to update hlop')
+
+    parser.add_argument('-sign_symmetric', action='store_true', help='sign symmetric')
+    parser.add_argument('-feedback_alignment', action='store_true', help='feedback alignment')
+
+    parser.add_argument('-baseline', action='store_true', help='baseline')
+
+    parser.add_argument('-replay', action='store_true', help='replay few-shot previous tasks')
+    parser.add_argument('-memory_size', default=50, type=int, help='memory size for replay')
+    parser.add_argument('-replay_epochs', default=1, type=int, help='epochs for replay')
+    parser.add_argument('-replay_b', default=50, type=int, help='batch size per task for replay')
+    parser.add_argument('-replay_lr', default=0.01, type=float, help='learning rate for replay')
+    parser.add_argument('-replay_T_max', default=20, type=int, help='T_max for CosineAnnealingLR for replay')
+
+    parser.add_argument('-gpu-id', default='0', type=str,
+                        help='id(s) for CUDA_VISIBLE_DEVICES')
+    # SNN settings
+    parser.add_argument('-timesteps', default=20, type=int)
+    parser.add_argument('-Vth', default=0.3, type=float)
+    parser.add_argument('-tau', default=1.0, type=float)
+    parser.add_argument('-delta_t', default=0.05, type=float)
+    parser.add_argument('-alpha', default=0.3, type=float)
+    parser.add_argument('-train_Vth', default=1, type=int)
+    parser.add_argument('-Vth_bound', default=0.0005, type=float)
+    parser.add_argument('-rate_stat', default=0, type=int)
+
+    parser.add_argument('-not_hlop_with_wfr', action='store_true', help='use spikes for hlop update')
+    parser.add_argument('-hlop_spiking', action='store_true', help='use hlop with lateral spiking neurons')
+    parser.add_argument('-hlop_spiking_scale', default=20., type=float)
+    parser.add_argument('-hlop_spiking_timesteps', default=1000., type=float)
+
+    args = parser.parse_args()
+
+    main(args)
