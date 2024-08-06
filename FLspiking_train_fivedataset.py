@@ -13,8 +13,8 @@ from torch.utils.tensorboard import SummaryWriter
 import FLcore.models
 from FLcore import models
 from FLcore.aggregation import FedAvg
-from FLcore.client import Client
-from FLcore.server import Server
+from FLcore.clients import Client
+from FLcore.servers import Server
 from FLcore.utils import Bar, accuracy
 from FLcore.meter import AverageMeter
 from FLcore.dataloader import five_datasets as data_loader

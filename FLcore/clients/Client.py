@@ -84,34 +84,6 @@ class Client:
         """
         self.local_model = copy.deepcopy(model)
 
-    def train(self, task_id, ncla, args, is_bptt, is_ottt):
-        """
-        获取task的id后进行训练
-        """
-        # 获取训练集
-        xtrain = self.xtrain[task_id]
-        ytrain = self.ytrain[task_id]
-
-        writer = SummaryWriter(os.path.join(self.logs_dir, "logs_task{task_id}".format(task_id=task_id)))
-        self.configure_opt(args.opt, args.lr)
-        self.configure_lr_scheduler(args.lr_scheduler, args.step_size, args.gamma, args.warmup, args.T_max, False)
-
-        # 如果需要重放
-        if args.replay:
-            # save samples for memory replay
-            self.replay_xtrain[task_id], self.replay_ytrain[task_id] = [], []
-            for c in range(ncla):
-                num = args.memory_size
-                index = 0
-                while num > 0:
-                    if ytrain[index] == c:
-                        self.replay_xtrain[task_id].append(xtrain[index])
-                        self.replay_ytrain[task_id].append(ytrain[index])
-                        num -= 1
-                    index += 1
-            self.replay_xtrain[task_id] = torch.stack(self.replay_xtrain[task_id], dim=0)
-            self.replay_ytrain[task_id] = torch.stack(self.replay_ytrain[task_id], dim=0)
-
     def train_epoch(self, task_id, local_epoch, args, is_bptt, is_ottt):
         self.xtrain_epoch = self.xtrain[task_id]
         self.ytrain_epoch = self.ytrain[task_id]
