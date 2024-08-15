@@ -7,28 +7,15 @@ This is the PyTorch implementation of the federated continual learning algorithm
 - NVIDIA GPU + [CUDA](https://developer.nvidia.com/cuda-downloads)
 - Python packages: `pip install numpy opencv-python`
 
+
 ## Training
 Run as following examples:
 
-	python FLspiking_train_pmnist.py -data_dir path_to_data_dir -out_dir log_checkpoint_name -gpu-id 0 -num_clients 2
+    # pmnist实验，使用FedAvg联邦算法，设置3个客户端，全局通信轮次为10，客户端本地epoch为1，数据集所在文件夹为dataset，实验过程相关日志文件会保存在logs文件夹下
+	python main.py --experiment_name pmnist --fed_algorithm FedAvg --num_clients 3 --global_rounds 10 --local_epochs 1 --dataset_path ./dataset --root_path ./logs
 	
-	# feedback alignment
-	python FLspiking_train_pmnist.py -data_dir path_to_data_dir -out_dir log_checkpoint_name -feedback_alignment -gpu-id 0 -num_clients 2
-	
-	# sign symmetric
-	python FLspiking_train_cifar.py -data_dir path_to_data_dir -out_dir log_checkpoint_name -sign_symmetric -gpu-id 0 -num_clients 2
-	
-	# baseline, i.e. vanilla sequential learning of different tasks
-	python FLspiking_train_fivedataset.py -data_dir path_to_data_dir -out_dir log_checkpoint_name -baseline -gpu-id 0 -num_clients 2
-	
-	# combination with memory replay (if combined with -baseline, corresponds to only memory replay)
-	python FLspiking_train_fivedataset.py -data_dir path_to_data_dir -out_dir log_checkpoint_name -replay -gpu-id 0 -num_clients 2
-	
-	# hlop with lateral spiking neurons
-	python FLspiking_train_pmnist.py -data_dir path_to_data_dir -out_dir log_checkpoint_name -hlop_spiking -hlop_spiking_scale 20. -hlop_spiking_timesteps 40 -gpu-id 0 -num_clients 2
-	
-	# for convolutional networks, can specify the hlop projection type for acceleration on CPU/GPU
-	-hlop_proj_type weight
+    # --experiment_name可选：【pmnist、pmnist_bptt、pmnist_ottt、cifar、miniimagenet、fivedataset、fivedataset_domain】
+    # --fed_algorithm可选：【FedAvg、SCAFFOLD（暂时没处理好）】
 
 The default hyperparameters are the same as the paper.
 
