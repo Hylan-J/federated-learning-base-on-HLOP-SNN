@@ -1,42 +1,21 @@
-# PFLlib: Personalized Federated Learning Algorithm Library
-# Copyright (C) 2021  Jianqing Zhang
-
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-
 import torch
 import numpy as np
 import time
 import copy
 import torch.nn as nn
-from flcore.optimizers.fedoptimizer import PerturbedGradientDescent
-from flcore.clients.clientbase import Client
+from ..optimizers.PerturbedGradientDescent import PerturbedGradientDescent
+from ..clients.clientbase import Client
 
 
 class clientProx(Client):
-    def __init__(self, args, id, train_samples, test_samples, **kwargs):
-        super().__init__(args, id, train_samples, test_samples, **kwargs)
-
+    def __init__(self, args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs):
+        super().__init__(args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs)
         self.mu = args.mu
-
-        self.global_params = copy.deepcopy(list(self.model.parameters()))
-
+        self.global_params = copy.deepcopy(list(self.local_model.parameters()))
         self.loss = nn.CrossEntropyLoss()
-        self.optimizer = PerturbedGradientDescent(
-            self.model.parameters(), lr=self.learning_rate, mu=self.mu)
+        self.optimizer = PerturbedGradientDescent(self.local_model.parameters(), lr=self.learning_rate, mu=self.mu)
         self.learning_rate_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-            optimizer=self.optimizer, 
+            optimizer=self.optimizer,
             gamma=args.learning_rate_decay_gamma
         )
 

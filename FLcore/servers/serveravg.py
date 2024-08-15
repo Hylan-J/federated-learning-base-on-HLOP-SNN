@@ -179,7 +179,7 @@ class FedAvg(Server):
 
             if self.num_new_clients > 0:
                 self.eval_new_clients = True
-                self.set_new_clients(clientAVG)
+                self.set_new_clients(clientAVG, self.xtrain, self.ytrain, self.xtest, self.ytest)
                 print(f"\n-------------Fine tuning round-------------")
                 print("\nEvaluate new clients")
                 self.evaluate(task_id, bptt, ottt)

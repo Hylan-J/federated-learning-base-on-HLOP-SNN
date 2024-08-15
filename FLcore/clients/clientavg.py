@@ -6,7 +6,7 @@ import time
 
 import numpy as np
 
-from .clientbase import Client
+from ..clients.clientbase import Client
 
 __all__ = ['clientAVG']
 

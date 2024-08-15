@@ -32,6 +32,7 @@ class Client(object):
         torch.manual_seed(0)
         self.args = args
         self.id = id  # id标识
+        self.fed_algorithm = args.fed_algorithm  # 联邦算法
 
         # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 训练设备、数据集 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         # 设备
@@ -337,7 +338,7 @@ class Client(object):
         self.replay_ytrain[task_id] = torch.stack(self.replay_ytrain[task_id], dim=0)
 
     # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 模型训练、重放、测试操作 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    def train_metrics(self, task_id, bptt, ottt):
+    def train_metrics(self, task_id, bptt, ottt, **kwargs):
         """
         训练
         @param task_id: 任务的id
@@ -345,6 +346,10 @@ class Client(object):
         @param ottt: 是否是ottt
         @return: 
         """
+        if self.fed_algorithm == 'SCAFFOLD':
+            global_c = kwargs[self.fed_algorithm]['global_c']
+            client_c = kwargs[self.fed_algorithm]['client_c']
+
         # 开启模型训练模式
         self.local_model.train()
 
@@ -408,9 +413,15 @@ class Client(object):
                         loss.backward()
                         total_loss += loss.detach()
                         if self.args.online_update:
-                            self.optimizer.step()
+                            if self.fed_algorithm == 'SCAFFOLD':
+                                self.optimizer.step(global_c, client_c)
+                            else:
+                                self.optimizer.step()
                     if not self.args.online_update:
-                        self.optimizer.step()
+                        if self.fed_algorithm == 'SCAFFOLD':
+                            self.optimizer.step(global_c, client_c)
+                        else:
+                            self.optimizer.step()
                     train_loss += total_loss.item() * label.numel()
                     out = total_fr
                 elif bptt:
@@ -424,7 +435,10 @@ class Client(object):
                                                update_hlop=flag, fix_subspace_id_list=[0])
                     loss = F.cross_entropy(out, label)
                     loss.backward()
-                    self.optimizer.step()
+                    if self.fed_algorithm == 'SCAFFOLD':
+                        self.optimizer.step(global_c, client_c)
+                    else:
+                        self.optimizer.step()
                     self.reset_net(self.local_model)
                     train_loss += loss.item() * label.numel()
                 else:
@@ -442,7 +456,10 @@ class Client(object):
                                                update_hlop=flag, fix_subspace_id_list=[0])
                     loss = F.cross_entropy(out, label)
                     loss.backward()
-                    self.optimizer.step()
+                    if self.fed_algorithm == 'SCAFFOLD':
+                        self.optimizer.step(global_c, client_c)
+                    else:
+                        self.optimizer.step()
                     train_loss += loss.item() * label.numel()
 
                 # measure accuracy and record loss
@@ -479,12 +496,16 @@ class Client(object):
 
         return train_loss, train_acc, train_num
 
-    def replay_metrics(self, tasks_learned):
+    def replay_metrics(self, tasks_learned, **kwargs):
         """
         重放
         @param tasks_learned: 学习完的任务
         @return:
         """
+        if self.fed_algorithm == 'SCAFFOLD':
+            global_c = kwargs[self.fed_algorithm]['global_c']
+            client_c = kwargs[self.fed_algorithm]['client_c']
+
         self.local_model.train()
         self.local_model.fix_bn()
 
@@ -508,7 +529,10 @@ class Client(object):
                     out = self.local_model(x, replay_task, projection=False, update_hlop=False)
                     loss = F.cross_entropy(out, label)
                     loss.backward()
-                self.optimizer.step()
+                if self.fed_algorithm == 'SCAFFOLD':
+                    self.optimizer.step(global_c, client_c)
+                else:
+                    self.optimizer.step()
             self.lr_scheduler.step()
 
     def test_metrics(self, task_id, bptt, ottt):
@@ -525,7 +549,8 @@ class Client(object):
         top5 = AverageMeter()
         end = time.time()
 
-        bar = Bar('Client {:3d} Testing'.format(self.id), max=((self.xtest[task_id].size(0) - 1) // self.batch_size + 1))
+        bar = Bar('Client {:3d} Testing'.format(self.id),
+                  max=((self.xtest[task_id].size(0) - 1) // self.batch_size + 1))
 
         test_acc = 0
         test_loss = 0

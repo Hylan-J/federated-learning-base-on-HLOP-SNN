@@ -10,6 +10,8 @@ import torch
 import torchvision
 
 from FLcore.servers.serveravg import FedAvg
+from FLcore.servers.serverscaffold import SCAFFOLD
+
 from FLcore.utils.prepare_utils import prepare_dataset, prepare_model
 
 # 创建日志记录器对象
@@ -32,8 +34,10 @@ def run(args):
         print("Creating server and clients ...")
         start = time.time()
 
-        if args.algorithm == "FedAvg":
+        if args.fed_algorithm == 'FedAvg':
             server = FedAvg(args, xtrain, ytrain, xtest, ytest, taskcla, model.to(args.device), i)
+        elif args.fed_algorithm == 'SCAFFOLD':
+            server = SCAFFOLD(args, xtrain, ytrain, xtest, ytest, taskcla, model.to(args.device), i)
 
         server.train(args.experiment_name, True)
 
@@ -107,11 +111,11 @@ if __name__ == "__main__":
     parser.add_argument('-ts', "--time_select", type=bool, default=False,
                         help="是否根据时间成本对每轮客户进行分组和选择")
     parser.add_argument('-tth', "--time_threthold", type=float, default=10000, help="丢弃慢客户端的阈值")
-
+    parser.add_argument('-slr', "--server_learning_rate", type=float, default=1.0)
     parser.add_argument("--experiment_name", type=str, default="pmnist", help="实验名称")
+    parser.add_argument('--fed_algorithm', type=str, default='FedAvg', help='联邦算法')
     parser.add_argument("--device", type=str, default="cuda", choices=["cpu", "cuda"], help="实验设备")
     parser.add_argument("--device_id", type=str, default="0", help="实验设备的id")
-    parser.add_argument("--algorithm", type=str, default="FedAvg", help="联邦算法")
     parser.add_argument("--num_clients", type=int, default=3, help="客户端数量")
     parser.add_argument("--batch_size", type=int, default=64, help="训练数据批处理大小")
     parser.add_argument("--replay_batch_size", default=64, type=int, help="回放数据批处理大小")
@@ -132,7 +136,7 @@ if __name__ == "__main__":
 
     print("=" * 50)
 
-    print("Algorithm: {}".format(args.algorithm))
+    print("Algorithm: {}".format(args.fed_algorithm))
     print("Local batch size: {}".format(args.batch_size))
     print("Local epochs: {}".format(args.local_epochs))
     print("Total number of clients: {}".format(args.num_clients))
