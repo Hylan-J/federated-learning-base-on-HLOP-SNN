@@ -16,6 +16,7 @@ __all__ = ['Server']
 
 class Server(object):
     def __init__(self, args, xtrain, ytrain, xtest, ytest, taskcla, model, times):
+        self.learning_rate = None
         torch.manual_seed(0)
         self.args = args
         # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 训练设备、数据集 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -150,11 +151,12 @@ class Server(object):
         从选中训练的客户端接收其本地模型
         @return:
         """
-        assert (len(self.selected_clients) > 0)  # 断言被选中的客户端数不为零
-
-        # 计算选中的客户端中的活跃客户端
-        activate_ratio = int((1 - self.client_drop_rate) * self.current_num_join_clients)
-        active_clients = random.sample(self.selected_clients, activate_ratio)
+        # 断言被选中的客户端数不为零
+        assert (len(self.selected_clients) > 0)
+        # 计算选中的客户端中的活跃客户端数量
+        activate_client_num = int((1 - self.client_drop_rate) * self.current_num_join_clients)
+        # 随机采样
+        activate_clients = random.sample(self.selected_clients, activate_client_num)
 
         self.received_info = {
             'client_ids': [],
@@ -162,7 +164,7 @@ class Server(object):
             'client_models': []
         }
 
-        for client in active_clients:
+        for client in activate_clients:
             try:
                 client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
                                    client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
@@ -199,7 +201,9 @@ class Server(object):
         向客户端发送全局模型
         @return:
         """
-        assert (len(self.clients) > 0)  # 断言服务器的客户端数不为零
+        # 断言服务器的客户端数不为零
+        assert (len(self.clients) > 0)
+
         for client in self.clients:
             start_time = time.time()
             client.set_parameters(self.global_model)
@@ -332,10 +336,10 @@ class Server(object):
     def fine_tuning_new_clients(self):
         for client in self.new_clients:
             client.set_parameters(self.global_model)
-            opt = torch.optim.SGD(client.model.parameters(), lr=self.learning_rate)
+            opt = torch.optim.SGD(client.local_model.parameters(), lr=self.learning_rate)
             CEloss = torch.nn.CrossEntropyLoss()
             trainloader = client.load_train_data()
-            client.model.train()
+            client.local_model.train()
             for e in range(self.fine_tuning_epoch_new):
                 for i, (x, y) in enumerate(trainloader):
                     if type(x) == type([]):
@@ -343,7 +347,7 @@ class Server(object):
                     else:
                         x = x.to(client.device)
                     y = y.to(client.device)
-                    output = client.model(x)
+                    output = client.local_model(x)
                     loss = CEloss(output, y)
                     opt.zero_grad()
                     loss.backward()

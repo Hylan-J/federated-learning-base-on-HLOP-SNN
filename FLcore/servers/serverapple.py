@@ -112,7 +112,7 @@ class APPLE(Server):
         cnt = 0
         psnr_val = 0
         for cid, client_model_server in zip(range(self.num_clients), self.client_models):
-            client_model = self.clients[cid].model
+            client_model = self.clients[cid].local_model
             client_model.eval()
             origin_grad = []
             for gp, pp in zip(client_model_server.parameters(), client_model.parameters()):

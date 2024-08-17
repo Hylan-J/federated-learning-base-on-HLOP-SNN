@@ -41,7 +41,7 @@ class FedGH(Server):
         self.CEloss = nn.CrossEntropyLoss()
         self.server_learning_rate = args.server_learning_rate
 
-        self.head = self.clients[0].model.head
+        self.head = self.clients[0].local_model.head
         self.opt_h = torch.optim.SGD(self.head.parameters(), lr=self.server_learning_rate)
 
 

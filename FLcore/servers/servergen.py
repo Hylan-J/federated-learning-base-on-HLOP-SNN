@@ -66,7 +66,7 @@ class FedGen(Server):
         self.server_epochs = args.server_epochs
         self.localize_feature_extractor = args.localize_feature_extractor
         if self.localize_feature_extractor:
-            self.global_model = copy.deepcopy(args.model.head)
+            self.global_model = copy.deepcopy(args.local_model.head)
         
 
     def train(self):
@@ -150,9 +150,9 @@ class FedGen(Server):
                 self.uploaded_ids.append(client.id)
                 self.uploaded_weights.append(client.train_samples)
                 if self.localize_feature_extractor:
-                    self.uploaded_models.append(client.model.head)
+                    self.uploaded_models.append(client.local_model.head)
                 else:
-                    self.uploaded_models.append(client.model)
+                    self.uploaded_models.append(client.local_model)
         for i, w in enumerate(self.uploaded_weights):
             self.uploaded_weights[i] = w / tot_samples
 
@@ -183,10 +183,10 @@ class FedGen(Server):
     def fine_tuning_new_clients(self):
         for client in self.new_clients:
             client.set_parameters(self.global_model, self.generative_model, self.qualified_labels)
-            opt = torch.optim.SGD(client.model.parameters(), lr=self.learning_rate)
+            opt = torch.optim.SGD(client.local_model.parameters(), lr=self.learning_rate)
             CEloss = torch.nn.CrossEntropyLoss()
             trainloader = client.load_train_data()
-            client.model.train()
+            client.local_model.train()
             for e in range(self.fine_tuning_epoch_new):
                 for i, (x, y) in enumerate(trainloader):
                     if type(x) == type([]):
@@ -194,7 +194,7 @@ class FedGen(Server):
                     else:
                         x = x.to(client.device)
                     y = y.to(client.device)
-                    output = client.model(x)
+                    output = client.local_model(x)
                     loss = CEloss(output, y)
                     opt.zero_grad()
                     loss.backward()

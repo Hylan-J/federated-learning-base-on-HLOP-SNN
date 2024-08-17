@@ -93,10 +93,10 @@ class FedPHP(Server):
     def fine_tuning_new_clients(self):
         for client in self.new_clients:
             client.set_parameters(self.global_model, self.global_rounds)
-            opt = torch.optim.SGD(client.model.parameters(), lr=self.learning_rate)
+            opt = torch.optim.SGD(client.local_model.parameters(), lr=self.learning_rate)
             CEloss = torch.nn.CrossEntropyLoss()
             trainloader = client.load_train_data()
-            client.model.train()
+            client.local_model.train()
             for e in range(self.fine_tuning_epoch_new):
                 for i, (x, y) in enumerate(trainloader):
                     if type(x) == type([]):
@@ -104,7 +104,7 @@ class FedPHP(Server):
                     else:
                         x = x.to(client.device)
                     y = y.to(client.device)
-                    output = client.model(x)
+                    output = client.local_model(x)
                     loss = CEloss(output, y)
                     opt.zero_grad()
                     loss.backward()

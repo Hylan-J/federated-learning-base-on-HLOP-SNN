@@ -29,7 +29,7 @@ class GPFL(Server):
         super().__init__(args, times)
 
 
-        self.feature_dim = list(args.model.head.parameters())[0].shape[1]
+        self.feature_dim = list(args.local_model.head.parameters())[0].shape[1]
         args.GCE = GCE(in_features=self.feature_dim,
                             num_classes=args.num_classes,
                             dev=args.device).to(args.device)
@@ -98,7 +98,7 @@ class GPFL(Server):
         for client in self.selected_clients:
             self.uploaded_weights.append(client.train_samples / active_train_samples)
             self.uploaded_ids.append(client.id)
-            self.uploaded_models.append(client.model.base)
+            self.uploaded_models.append(client.local_model.base)
             
     def global_GCE(self):
         active_train_samples = 0

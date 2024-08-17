@@ -1,27 +1,10 @@
-# PFLlib: Personalized Federated Learning Algorithm Library
-# Copyright (C) 2021  Jianqing Zhang
-
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-
 import copy
 import torch
 import torch.nn as nn
 import numpy as np
 import time
 import torch.nn.functional as F
-from flcore.clients.clientbase import Client
+from ..clients.clientbase import Client
 
 
 class clientKD(Client):
@@ -30,14 +13,14 @@ class clientKD(Client):
 
         self.mentee_learning_rate = args.mentee_learning_rate
 
-        self.global_model = copy.deepcopy(args.model)
+        self.global_model = copy.deepcopy(args.local_model)
         self.optimizer_g = torch.optim.SGD(self.global_model.parameters(), lr=self.mentee_learning_rate)
         self.learning_rate_scheduler_g = torch.optim.lr_scheduler.ExponentialLR(
             optimizer=self.optimizer_g, 
             gamma=args.learning_rate_decay_gamma
         )
 
-        self.feature_dim = list(args.model.head.parameters())[0].shape[1]
+        self.feature_dim = list(args.local_model.head.parameters())[0].shape[1]
         self.W_h = nn.Linear(self.feature_dim, self.feature_dim, bias=False).to(self.device)
         self.optimizer_W = torch.optim.SGD(self.W_h.parameters(), lr=self.learning_rate)
         self.learning_rate_scheduler_W = torch.optim.lr_scheduler.ExponentialLR(

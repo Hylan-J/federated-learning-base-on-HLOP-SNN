@@ -95,7 +95,7 @@ class FedCAC(Server):
 
         # calculate the customized global model for each client
         for i in range(self.args.num_clients):
-            w_customized_global = copy.deepcopy(self.clients[i].model.state_dict())
+            w_customized_global = copy.deepcopy(self.clients[i].local_model.state_dict())
             collaboration_clients = [i]
             # find clients whose critical parameter locations are similar to client i
             index = 0
@@ -110,7 +110,7 @@ class FedCAC(Server):
                 for client in collaboration_clients:
                     if client == i:
                         continue
-                    w_customized_global[key] += self.clients[client].model.state_dict()[key]
+                    w_customized_global[key] += self.clients[client].local_model.state_dict()[key]
                 w_customized_global[key] = torch.div(w_customized_global[key], float(len(collaboration_clients)))
             # send the customized global model to client i
             self.clients[i].customized_model.load_state_dict(w_customized_global)

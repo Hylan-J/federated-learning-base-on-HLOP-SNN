@@ -39,7 +39,7 @@ class FedDyn(Server):
 
         self.alpha = args.alpha
         
-        self.server_state = copy.deepcopy(args.model)
+        self.server_state = copy.deepcopy(args.local_model)
         for param in self.server_state.parameters():
             param.data = torch.zeros_like(param.data)
 

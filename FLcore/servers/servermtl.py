@@ -96,4 +96,4 @@ class FedMTL(Server):
     def aggregate_parameters(self):
         self.W_glob = torch.zeros((self.dim, self.num_join_clients), device=self.device)
         for idx, client in enumerate(self.selected_clients):
-            self.W_glob[:, idx] = self.flatten(client.model)
+            self.W_glob[:, idx] = self.flatten(client.local_model)

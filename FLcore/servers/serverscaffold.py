@@ -17,21 +17,19 @@ __all__ = ['SCAFFOLD']
 class SCAFFOLD(Server):
     def __init__(self, args, xtrain, ytrain, xtest, ytest, taskcla, model, times):
         super().__init__(args, xtrain, ytrain, xtest, ytest, taskcla, model, times)
-
-        # select slow clients
         self.set_slow_clients()
         self.set_clients(clientSCAFFOLD, self.xtrain, self.ytrain, self.xtest, self.ytest, model)
 
         print(f"\nJoin ratio / total clients: {self.join_ratio} / {self.num_clients}")
         print("Finished creating server and clients.")
 
-        # self.load_model()
-        self.time_cost = []
+        # 全局控制变量
+        self.global_controls = [torch.zeros_like(param) for param in self.global_model.parameters()]
+        """for param in self.global_model.parameters():
+            self.global_controls.append(torch.zeros_like(param))"""
 
-        self.server_learning_rate = args.server_learning_rate
-        self.global_c = []
-        for param in self.global_model.parameters():
-            self.global_c.append(torch.zeros_like(param))
+        self.learning_rate = args.server_learning_rate
+        self.time_cost = []
 
     def train(self, experiment_name: str, replay: bool):
         bptt, ottt = prepare_bptt_ottt(experiment_name)
@@ -50,7 +48,7 @@ class SCAFFOLD(Server):
 
         for task_id, ncla in self.taskcla:
             task_learned.append(task_id)
-            writer = SummaryWriter(os.path.join(self.args.root_path, 'checkpoint_task{task_id}'.format(task_id=task_id)))
+            writer = SummaryWriter(os.path.join(self.args.root_path, 'task{task_id}'.format(task_id=task_id)))
 
             if replay:
                 for client in self.clients:
@@ -117,22 +115,19 @@ class SCAFFOLD(Server):
                         client.local_model.add_classifier(ncla)
                         client.local_model.add_hlop_subspace(hlop_out_num_inc)
 
-            self.send_models()
-            for client in self.clients:
-                client.set_optimizer(task_id, experiment_name, False)
-                client.set_learning_rate_scheduler(experiment_name, False)
-
             # 对于任务task_id，进行联邦训练
             for global_round in range(1, self.global_rounds + 1):
                 start_time = time.time()
                 self.select_clients(task_id)
                 self.send_models()
+
                 for client in self.selected_clients:
                     client.train(task_id, bptt, ottt)
+
                 self.receive_models()
                 """if self.dlg_eval and global_round % self.dlg_gap == 0:
                         self.call_dlg(global_round)"""
-                self.aggregate_parameters()
+                self.aggregate_parameters(task_id)
                 self.time_cost.append(time.time() - start_time)
                 print('-' * 25, 'Task', task_id, 'Time Cost', '-' * 25, self.time_cost[-1])
                 # 当前轮次达到评估轮次
@@ -162,9 +157,6 @@ class SCAFFOLD(Server):
             # 如果重放并且起码参与了一个任务
             if replay and task_count >= 1:
                 print('memory replay\n')
-                for client in self.clients:
-                    client.set_optimizer(task_id, experiment_name, True)
-                    client.set_learning_rate_scheduler(experiment_name, True)
 
                 for replay_global_round in range(1, self.replay_global_rounds + 1):
                     self.select_clients(task_id)
@@ -173,7 +165,7 @@ class SCAFFOLD(Server):
                     for client in self.clients:
                         client.replay(task_learned)
                     self.receive_models()
-                    self.aggregate_parameters()
+                    self.aggregate_parameters(task_id)
 
                 # 保存准确率
                 jj = 0
@@ -197,70 +189,81 @@ class SCAFFOLD(Server):
             task_count += 1
 
     def send_models(self):
+        """
+        向客户端发送全局模型
+        @return:
+        """
+        # 断言服务器的客户端数不为零
         assert (len(self.clients) > 0)
 
         for client in self.clients:
             start_time = time.time()
-
-            client.set_parameters(self.global_model, self.global_c)
-
+            client.set_parameters(self.global_model, self.global_controls)
             client.send_time_cost['num_rounds'] += 1
             client.send_time_cost['total_cost'] += 2 * (time.time() - start_time)
 
     def receive_models(self):
+        """
+        从选中训练的客户端接收其本地模型
+        @return:
+        """
+        # 断言被选中的客户端数不为零
         assert (len(self.selected_clients) > 0)
+        # 计算选中的客户端中的活跃客户端数量
+        activate_client_num = int((1 - self.client_drop_rate) * self.current_num_join_clients)
+        # 随机采样
+        activate_clients = random.sample(self.selected_clients, activate_client_num)
 
-        active_clients = random.sample(
-            self.selected_clients, int((1 - self.client_drop_rate) * self.current_num_join_clients))
+        self.received_info = {
+            'client_ids': [],
+            'client_weights': [],
+            'client_models': []
+        }
 
-        self.uploaded_ids = []
-        self.uploaded_weights = []
-        tot_samples = 0
-        # self.delta_ys = []
-        # self.delta_cs = []
-        for client in active_clients:
+        for client in activate_clients:
             try:
                 client_time_cost = client.train_time_cost['total_cost'] / client.train_time_cost['num_rounds'] + \
                                    client.send_time_cost['total_cost'] / client.send_time_cost['num_rounds']
             except ZeroDivisionError:
                 client_time_cost = 0
+
             if client_time_cost <= self.time_threthold:
-                tot_samples += client.train_samples
-                self.uploaded_ids.append(client.id)
-                self.uploaded_weights.append(client.train_samples)
-                # self.delta_ys.append(client.delta_y)
-                # self.delta_cs.append(client.delta_c)
-        for i, w in enumerate(self.uploaded_weights):
-            self.uploaded_weights[i] = w / tot_samples
+                self.received_info['client_ids'].append(client.id)
+                self.received_info['client_weights'].append(client.train_samples)
+                self.received_info['client_models'].append(client.local_model)
 
-    def aggregate_parameters(self):
-        # original version
-        # for dy, dc in zip(self.delta_ys, self.delta_cs):
-        #     for server_param, client_param in zip(self.global_model.parameters(), dy):
-        #         server_param.data += client_param.data.clone() / self.num_join_clients * self.server_learning_rate
-        #     for server_param, client_param in zip(self.global_c, dc):
-        #         server_param.data += client_param.data.clone() / self.num_clients
+        total_client_train_samples = sum(self.received_info['client_weights'])
+        for idx, train_samples in enumerate(self.received_info['client_weights']):
+            self.received_info['client_weights'][idx] = train_samples / total_client_train_samples
 
-        # save GPU memory
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 重写的方法 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    def aggregate_parameters(self, task_id):
+        """
+        SCAFFOLD聚合参数
+        @return:
+        """
+        # 全局模型的深拷贝
         global_model = copy.deepcopy(self.global_model)
-        global_c = copy.deepcopy(self.global_c)
-        for cid in self.uploaded_ids:
-            dy, dc = self.clients[cid].delta_yc()
-            for server_param, client_param in zip(global_model.parameters(), dy):
-                server_param.data += client_param.data.clone() / self.num_join_clients * self.server_learning_rate
-            for server_param, client_param in zip(global_c, dc):
-                server_param.data += client_param.data.clone() / self.num_clients
+        # 全局控制参数的深拷贝
+        global_controls = copy.deepcopy(self.global_controls)
+        # 计算聚合后的全局模型和控制参数
+        for idx in self.received_info['client_ids']:
+            delta_model, delta_control = self.clients[idx].calculate_delta_model_and_control_param(task_id)
+            for global_model_param, local_model_param in zip(global_model.parameters(), delta_model):
+                global_model_param.data += local_model_param.data.clone() / self.num_join_clients * self.learning_rate
+            for global_control_param, local_control_param in zip(global_controls, delta_control):
+                global_control_param.data += local_control_param.data.clone() / self.num_clients
         self.global_model = global_model
-        self.global_c = global_c
+        self.global_controls = global_controls
 
     # fine-tuning on new clients
-    """def fine_tuning_new_clients(self):
+    def fine_tuning_new_clients(self):
         for client in self.new_clients:
-            client.set_parameters(self.global_model, self.global_c)
-            opt = torch.optim.SGD(client.model.parameters(), lr=self.learning_rate)
+            client.set_parameters(self.global_model, self.global_controls)
+            opt = torch.optim.SGD(client.local_model.parameters(), lr=self.learning_rate)
             CEloss = torch.nn.CrossEntropyLoss()
             trainloader = client.load_train_data()
-            client.model.train()
+            client.local_model.train()
             for e in range(self.fine_tuning_epoch_new):
                 for i, (x, y) in enumerate(trainloader):
                     if type(x) == type([]):
@@ -268,8 +271,8 @@ class SCAFFOLD(Server):
                     else:
                         x = x.to(client.device)
                     y = y.to(client.device)
-                    output = client.model(x)
+                    output = client.local_model(x)
                     loss = CEloss(output, y)
                     opt.zero_grad()
                     loss.backward()
-                    opt.step()"""
+                    opt.step()

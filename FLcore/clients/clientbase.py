@@ -6,16 +6,18 @@ import math
 import os
 import time
 
-from progress.bar import Bar
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from progress.bar import Bar
 
-from ..meter import AverageMeter
-from ..utils import accuracy
+from ..meter.AverageMeter import AverageMeter
+from ..utils.eval import accuracy
 
 __all__ = ['Client']
+
+from ..utils.model_utils import reset_net
 
 
 class Client(object):
@@ -54,7 +56,7 @@ class Client(object):
         # 学习率调节器
         self.local_model = copy.deepcopy(local_model)
         self.optimizer = None
-        self.learning_rate = None
+        self.learning_rate = args.client_learning_rate
         self.lr_scheduler = None
         # 本地轮次
         # 重放轮次
@@ -89,46 +91,14 @@ class Client(object):
         self.logs_path = os.path.join(self.root_path, 'logs')
         self.models_path = os.path.join(self.root_path, 'models')
 
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 模型参数相关操作 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     def set_parameters(self, model):
         """
-        根据接收到的模型设置本地模型参数
+        根据接收到的模型参数设置本地模型参数
         :param model: 接收到的模型
         :return:
         """
         for new_param, old_param in zip(model.parameters(), self.local_model.parameters()):
             old_param.data = new_param.data.clone()
-
-    def clone_model(self, model, target):
-        """
-        将原始模型（model）的模型参数进行克隆并获得目标模型（target）
-        :param model: 被克隆的原始模型
-        :param target: 克隆出的目标模型
-        :return:
-        """
-        for param, target_param in zip(model.parameters(), target.parameters()):
-            target_param.data = param.data.clone()
-            # target_param.grad = param.grad.clone()
-
-    def update_parameters(self, model, new_params):
-        """
-        利用新的参数（new_params）更新模型（model）的参数
-        :param model: 参数待更新的模型
-        :param new_params: 新的参数
-        :return:
-        """
-        for param, new_param in zip(model.parameters(), new_params):
-            param.data = new_param.data.clone()
-
-    def reset_net(self, net: nn.Module):
-        """
-        将网络的状态重置。做法是遍历网络中的所有 ``Module``，若含有 ``reset()`` 函数，则调用。
-        @param net: 任何属于 ``nn.Module`` 子类的网络
-        @return:
-        """
-        for m in net.modules():
-            if hasattr(m, 'reset'):
-                m.reset()
 
     def set_optimizer(self, task_id: int, experiment_name: str, replay: bool):
         """
@@ -346,10 +316,6 @@ class Client(object):
         @param ottt: 是否是ottt
         @return: 
         """
-        if self.fed_algorithm == 'SCAFFOLD':
-            global_c = kwargs[self.fed_algorithm]['global_c']
-            client_c = kwargs[self.fed_algorithm]['client_c']
-
         # 开启模型训练模式
         self.local_model.train()
 
@@ -414,12 +380,12 @@ class Client(object):
                         total_loss += loss.detach()
                         if self.args.online_update:
                             if self.fed_algorithm == 'SCAFFOLD':
-                                self.optimizer.step(global_c, client_c)
+                                self.optimizer.step(self.global_controls, self.local_controls)
                             else:
                                 self.optimizer.step()
                     if not self.args.online_update:
                         if self.fed_algorithm == 'SCAFFOLD':
-                            self.optimizer.step(global_c, client_c)
+                            self.optimizer.step(self.global_controls, self.local_controls)
                         else:
                             self.optimizer.step()
                     train_loss += total_loss.item() * label.numel()
@@ -436,10 +402,10 @@ class Client(object):
                     loss = F.cross_entropy(out, label)
                     loss.backward()
                     if self.fed_algorithm == 'SCAFFOLD':
-                        self.optimizer.step(global_c, client_c)
+                        self.optimizer.step(self.global_controls, self.local_controls)
                     else:
                         self.optimizer.step()
-                    self.reset_net(self.local_model)
+                    reset_net(self.local_model)
                     train_loss += loss.item() * label.numel()
                 else:
                     x = x.unsqueeze(1)
@@ -457,7 +423,7 @@ class Client(object):
                     loss = F.cross_entropy(out, label)
                     loss.backward()
                     if self.fed_algorithm == 'SCAFFOLD':
-                        self.optimizer.step(global_c, client_c)
+                        self.optimizer.step(self.global_controls, self.local_controls)
                     else:
                         self.optimizer.step()
                     train_loss += loss.item() * label.numel()
@@ -502,9 +468,6 @@ class Client(object):
         @param tasks_learned: 学习完的任务
         @return:
         """
-        if self.fed_algorithm == 'SCAFFOLD':
-            global_c = kwargs[self.fed_algorithm]['global_c']
-            client_c = kwargs[self.fed_algorithm]['client_c']
 
         self.local_model.train()
         self.local_model.fix_bn()
@@ -530,7 +493,7 @@ class Client(object):
                     loss = F.cross_entropy(out, label)
                     loss.backward()
                 if self.fed_algorithm == 'SCAFFOLD':
-                    self.optimizer.step(global_c, client_c)
+                    self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
                 else:
                     self.optimizer.step()
             self.lr_scheduler.step()

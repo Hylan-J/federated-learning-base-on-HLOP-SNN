@@ -124,7 +124,7 @@ class FedFomo(Server):
                 tot_samples += client.train_samples
                 self.uploaded_ids.append(client.id)
                 self.uploaded_weights.append(client.train_samples)
-                self.client_models[client.id] = copy.deepcopy(client.model)
+                self.client_models[client.id] = copy.deepcopy(client.local_model)
                 self.P[client.id] += client.weight_vector
         for i, w in enumerate(self.uploaded_weights):
             self.uploaded_weights[i] = w / tot_samples
@@ -134,7 +134,7 @@ class FedFomo(Server):
         cnt = 0
         psnr_val = 0
         for cid, client_model_server in zip(range(self.num_clients), self.client_models):
-            client_model = self.clients[cid].model
+            client_model = self.clients[cid].local_model
             client_model.eval()
             origin_grad = []
             for gp, pp in zip(client_model_server.parameters(), client_model.parameters()):

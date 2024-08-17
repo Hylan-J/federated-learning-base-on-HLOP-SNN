@@ -104,6 +104,12 @@ if __name__ == "__main__":
     parser.add_argument('-bnpc', "--batch_num_per_client", type=int, default=2)
     parser.add_argument('-nnc', "--num_new_clients", type=int, default=0)
     parser.add_argument('-ften', "--fine_tuning_epoch_new", type=int, default=0)
+
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 学习率相关参数 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    parser.add_argument("--server_learning_rate", type=float, default=1.0, help="服务器学习率")
+    parser.add_argument("--client_learning_rate", type=float, default=0.005, help="客户端学习率")
+    parser.add_argument("--learning_rate_decay", type=bool, default=False)
+    parser.add_argument("--learning_rate_decay_gamma", type=float, default=0.99)
     # 实际参数？
     parser.add_argument('-cdr', "--client_drop_rate", type=float, default=0.0, help="参与训练但中途退出的客户端比例")
     parser.add_argument('-tsr', "--train_slow_rate", type=float, default=0.0, help="本地训练时，速度慢的客户端比例")
@@ -111,7 +117,7 @@ if __name__ == "__main__":
     parser.add_argument('-ts', "--time_select", type=bool, default=False,
                         help="是否根据时间成本对每轮客户进行分组和选择")
     parser.add_argument('-tth', "--time_threthold", type=float, default=10000, help="丢弃慢客户端的阈值")
-    parser.add_argument('-slr', "--server_learning_rate", type=float, default=1.0)
+
     parser.add_argument("--experiment_name", type=str, default="pmnist", help="实验名称")
     parser.add_argument('--fed_algorithm', type=str, default='FedAvg', help='联邦算法')
     parser.add_argument("--device", type=str, default="cuda", choices=["cpu", "cuda"], help="实验设备")
@@ -128,6 +134,7 @@ if __name__ == "__main__":
     # 解析命令行参数
     args = parser.parse_args()
 
+    args.root_path = os.path.join('logs', args.experiment_name+time.strftime(" %Y-%m-%d %H：%M：%S"))
     os.environ["CUDA_VISIBLE_DEVICES"] = args.device_id
 
     if args.device == "cuda" and not torch.cuda.is_available():

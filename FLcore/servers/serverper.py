@@ -99,6 +99,6 @@ class FedPer(Server):
             if client_time_cost <= self.time_threthold:
                 tot_samples += client.train_samples
                 self.uploaded_weights.append(client.train_samples)
-                self.uploaded_models.append(client.model.base)
+                self.uploaded_models.append(client.local_model.base)
         for i, w in enumerate(self.uploaded_weights):
             self.uploaded_weights[i] = w / tot_samples

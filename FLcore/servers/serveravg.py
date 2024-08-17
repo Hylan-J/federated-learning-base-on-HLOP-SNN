@@ -40,7 +40,7 @@ class FedAvg(Server):
 
         for task_id, ncla in self.taskcla:
             task_learned.append(task_id)
-            writer = SummaryWriter(os.path.join(self.args.root_path, 'checkpoint_task{task_id}'.format(task_id=task_id)))
+            writer = SummaryWriter(os.path.join(self.args.root_path, 'task{task_id}'.format(task_id=task_id)))
 
             if replay:
                 for client in self.clients:

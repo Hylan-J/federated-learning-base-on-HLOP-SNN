@@ -31,7 +31,7 @@ class clientCP(Client):
 
         self.lamda = args.lamda
 
-        in_dim = list(args.model.head.parameters())[0].shape[1]
+        in_dim = list(args.local_model.head.parameters())[0].shape[1]
         self.context = torch.rand(1, in_dim).to(self.device)
 
         self.model = Ensemble(

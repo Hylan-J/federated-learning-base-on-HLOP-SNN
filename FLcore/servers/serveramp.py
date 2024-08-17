@@ -98,7 +98,7 @@ class FedAMP(Server):
                 coef = torch.zeros(self.num_join_clients)
                 for j, mw in enumerate(self.uploaded_models):
                     if c.id != self.uploaded_ids[j]:
-                        weights_i = torch.cat([p.data.view(-1) for p in c.model.parameters()], dim=0)
+                        weights_i = torch.cat([p.data.view(-1) for p in c.local_model.parameters()], dim=0)
                         weights_j = torch.cat([p.data.view(-1) for p in mw.parameters()], dim=0)
                         sub = (weights_i - weights_j).view(-1)
                         sub = torch.dot(sub, sub)
@@ -130,7 +130,7 @@ class FedAMP(Server):
         cnt = 0
         psnr_val = 0
         for cid, client_model_server in zip(range(self.num_clients), self.client_models):
-            client_model = self.clients[cid].model
+            client_model = self.clients[cid].local_model
             client_model.eval()
             origin_grad = []
             for gp, pp in zip(client_model_server.parameters(), client_model.parameters()):

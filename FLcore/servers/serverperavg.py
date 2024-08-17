@@ -88,17 +88,17 @@ class PerAvg(Server):
     def evaluate_one_step(self, acc=None, loss=None):
         models_temp = []
         for c in self.clients:
-            models_temp.append(copy.deepcopy(c.model))
+            models_temp.append(copy.deepcopy(c.local_model))
             c.train_one_step()
         stats = self.test_metrics()
         # set the local model back on clients for training process
         for i, c in enumerate(self.clients):
-            c.clone_model(models_temp[i], c.model)
+            c.clone_model(models_temp[i], c.local_model)
             
         stats_train = self.train_metrics()
         # set the local model back on clients for training process
         for i, c in enumerate(self.clients):
-            c.clone_model(models_temp[i], c.model)
+            c.clone_model(models_temp[i], c.local_model)
 
         accs = [a / n for a, n in zip(stats[2], stats[1])]
 

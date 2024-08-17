@@ -31,7 +31,7 @@ class FedGC(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
 
-        self.global_model = copy.deepcopy(args.model.base)
+        self.global_model = copy.deepcopy(args.local_model.base)
 
         # select slow clients
         self.set_slow_clients()
@@ -43,7 +43,7 @@ class FedGC(Server):
         # self.load_model()
         self.Budget = []
         self.server_learning_rate = args.local_learning_rate * args.lamda
-        self.client_heads = [copy.deepcopy(c.model.head) for c in self.clients]
+        self.client_heads = [copy.deepcopy(c.local_model.head) for c in self.clients]
         self.opt_client_heads = [torch.optim.SGD(h.parameters(), lr=self.server_learning_rate) 
                                  for h in self.client_heads]
         self.classes_indexs = [copy.deepcopy(c.classes_index) for c in self.clients]
@@ -147,8 +147,8 @@ class FedGC(Server):
                 tot_samples += client.train_samples
                 self.uploaded_ids.append(client.id)
                 self.uploaded_weights.append(client.train_samples)
-                self.uploaded_models.append(client.model.base)
-                self.client_heads[client.id].weight.data = client.model.head.weight.data.clone()
+                self.uploaded_models.append(client.local_model.base)
+                self.client_heads[client.id].weight.data = client.local_model.head.weight.data.clone()
         for i, w in enumerate(self.uploaded_weights):
             self.uploaded_weights[i] = w / tot_samples
 

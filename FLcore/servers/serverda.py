@@ -26,7 +26,7 @@ from threading import Thread
 class PFL_DA(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
-        self.global_model = copy.deepcopy(args.model.head)
+        self.global_model = copy.deepcopy(args.local_model.head)
 
         # select slow clients
         self.set_slow_clients()

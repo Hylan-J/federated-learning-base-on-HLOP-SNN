@@ -31,7 +31,7 @@ class clientFML(Client):
         self.alpha = args.alpha
         self.beta = args.beta
 
-        self.global_model = copy.deepcopy(args.model)
+        self.global_model = copy.deepcopy(args.local_model)
         self.optimizer_g = torch.optim.SGD(self.global_model.parameters(), lr=self.learning_rate)
         self.learning_rate_scheduler_g = torch.optim.lr_scheduler.ExponentialLR(
             optimizer=self.optimizer_g, 

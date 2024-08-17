@@ -8,8 +8,8 @@ from ..clients.clientbase import Client
 
 
 class clientProx(Client):
-    def __init__(self, args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs):
-        super().__init__(args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs)
+    def __init__(self, args, id, xtrain, ytrain, xtest, ytest, model, **kwargs):
+        super().__init__(args, id, xtrain, ytrain, xtest, ytest, model, **kwargs)
         self.mu = args.mu
         self.global_params = copy.deepcopy(list(self.local_model.parameters()))
         self.loss = nn.CrossEntropyLoss()
@@ -24,7 +24,7 @@ class clientProx(Client):
         start_time = time.time()
 
         # self.model.to(self.device)
-        self.model.train()
+        self.local_model.train()
 
         max_local_epochs = self.local_epochs
         if self.train_slow:
@@ -39,7 +39,7 @@ class clientProx(Client):
                 y = y.to(self.device)
                 if self.train_slow:
                     time.sleep(0.1 * np.abs(np.random.rand()))
-                output = self.model(x)
+                output = self.local_model(x)
                 loss = self.loss(output, y)
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -55,7 +55,7 @@ class clientProx(Client):
 
 
     def set_parameters(self, model):
-        for new_param, global_param, param in zip(model.parameters(), self.global_params, self.model.parameters()):
+        for new_param, global_param, param in zip(model.parameters(), self.global_params, self.local_model.parameters()):
             global_param.data = new_param.data.clone()
             param.data = new_param.data.clone()
 
@@ -63,7 +63,7 @@ class clientProx(Client):
         trainloader = self.load_train_data()
         # self.model = self.load_model('model')
         # self.model.to(self.device)
-        self.model.eval()
+        self.local_model.eval()
 
         train_num = 0
         losses = 0
@@ -74,11 +74,11 @@ class clientProx(Client):
                 else:
                     x = x.to(self.device)
                 y = y.to(self.device)
-                output = self.model(x)
+                output = self.local_model(x)
                 loss = self.loss(output, y)
 
                 gm = torch.cat([p.data.view(-1) for p in self.global_params], dim=0)
-                pm = torch.cat([p.data.view(-1) for p in self.model.parameters()], dim=0)
+                pm = torch.cat([p.data.view(-1) for p in self.local_model.parameters()], dim=0)
                 loss += 0.5 * self.mu * torch.norm(gm-pm, p=2)
 
                 train_num += y.shape[0]

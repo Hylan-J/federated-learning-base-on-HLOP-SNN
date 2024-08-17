@@ -28,7 +28,7 @@ class FedCP(Server):
     def __init__(self, args, times):
         super().__init__(args, times)
 
-        in_dim = list(args.model.head.parameters())[0].shape[1]
+        in_dim = list(args.local_model.head.parameters())[0].shape[1]
         cs = ConditionalSelection(in_dim, in_dim).to(args.device)
 
         # select slow clients
@@ -131,12 +131,12 @@ class FedCP(Server):
         for client in self.selected_clients:
             self.uploaded_weights.append(client.train_samples / active_train_samples)
             self.uploaded_ids.append(client.id)
-            self.uploaded_models.append(client.model.model.base)
+            self.uploaded_models.append(client.local_model.local_model.base)
 
     def global_head(self):
         self.uploaded_model_gs = []
         for client in self.selected_clients:
-            self.uploaded_model_gs.append(client.model.head_g)
+            self.uploaded_model_gs.append(client.local_model.head_g)
 
         self.head = copy.deepcopy(self.uploaded_model_gs[0])
         for param in self.head.parameters():
@@ -155,7 +155,7 @@ class FedCP(Server):
     def global_cs(self):
         self.uploaded_model_gs = []
         for client in self.selected_clients:
-            self.uploaded_model_gs.append(client.model.gate.cs)
+            self.uploaded_model_gs.append(client.local_model.gate.cs)
 
         self.cs = copy.deepcopy(self.uploaded_model_gs[0])
         for param in self.cs.parameters():
