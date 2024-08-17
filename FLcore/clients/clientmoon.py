@@ -1,37 +1,20 @@
-# PFLlib: Personalized Federated Learning Algorithm Library
-# Copyright (C) 2021  Jianqing Zhang
-
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
-
 import copy
 import torch
 import numpy as np
 import time
 import torch.nn.functional as F
-from flcore.clients.clientbase import Client
+from ..clients.clientbase import Client
 
 
 class clientMOON(Client):
-    def __init__(self, args, id, train_samples, test_samples, **kwargs):
-        super().__init__(args, id, train_samples, test_samples, **kwargs)
+    def __init__(self, args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs):
+        super().__init__(args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs)
 
-        self.tau = args.tau
+        self.tau = args.server_tau
         self.mu = args.mu
 
         self.global_model = None
-        self.old_model = copy.deepcopy(self.model)
+        self.old_model = copy.deepcopy(self.local_model)
 
     def train(self):
         trainloader = self.load_train_data()
@@ -59,7 +42,9 @@ class clientMOON(Client):
 
                 rep_old = self.old_model.base(x).detach()
                 rep_global = self.global_model.base(x).detach()
-                loss_con = - torch.log(torch.exp(F.cosine_similarity(rep, rep_global) / self.tau) / (torch.exp(F.cosine_similarity(rep, rep_global) / self.tau) + torch.exp(F.cosine_similarity(rep, rep_old) / self.tau)))
+                loss_con = - torch.log(torch.exp(F.cosine_similarity(rep, rep_global) / self.tau) / (
+                            torch.exp(F.cosine_similarity(rep, rep_global) / self.tau) + torch.exp(
+                        F.cosine_similarity(rep, rep_old) / self.tau)))
                 loss += self.mu * torch.mean(loss_con)
 
                 self.optimizer.zero_grad()
@@ -75,12 +60,10 @@ class clientMOON(Client):
         self.train_time_cost['num_rounds'] += 1
         self.train_time_cost['total_cost'] += time.time() - start_time
 
-
     def set_parameters(self, model):
-        for new_param, old_param in zip(model.parameters(), self.model.parameters()):
-            old_param.data = new_param.data.clone()
-
-        self.global_model = model
+        for global_param, local_param in zip(model.parameters(), self.local_model.parameters()):
+            local_param.data = global_param.data.clone()
+        self.global_model = copy.deepcopy(model)
 
     def train_metrics(self):
         trainloader = self.load_train_data()
@@ -103,7 +86,9 @@ class clientMOON(Client):
 
                 rep_old = self.old_model.base(x).detach()
                 rep_global = self.global_model.base(x).detach()
-                loss_con = - torch.log(torch.exp(F.cosine_similarity(rep, rep_global) / self.tau) / (torch.exp(F.cosine_similarity(rep, rep_global) / self.tau) + torch.exp(F.cosine_similarity(rep, rep_old) / self.tau)))
+                loss_con = - torch.log(torch.exp(F.cosine_similarity(rep, rep_global) / self.tau) / (
+                            torch.exp(F.cosine_similarity(rep, rep_global) / self.tau) + torch.exp(
+                        F.cosine_similarity(rep, rep_old) / self.tau)))
                 loss += self.mu * torch.mean(loss_con)
                 train_num += y.shape[0]
                 losses += loss.item() * y.shape[0]
