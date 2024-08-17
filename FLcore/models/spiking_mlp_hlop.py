@@ -8,9 +8,7 @@ from ..modules.proj_linear import LinearProj, SSLinear, SSLinearProj, FALinear, 
 from ..modules.hlop_module import HLOP
 import numpy as np
 
-__all__ = [
-    'spiking_MLP'
-]
+__all__ = ['spiking_MLP']
 
 
 class spiking_MLP(nn.Module):
@@ -177,8 +175,8 @@ class spiking_MLP(nn.Module):
             self.classifiers.append(nn.Linear(self.n_hidden, num_classes).to(self.classifiers[0].weight.device))
 
     def merge_hlop_subspace(self):
-        for m in self.hlop_modules:
-            m.merge_subspace()
+        for module in self.hlop_modules:
+            module.merge_subspace()
 
     def add_hlop_subspace(self, out_numbers):
         if isinstance(out_numbers, list):
@@ -193,12 +191,24 @@ class spiking_MLP(nn.Module):
     #        m.adjust_lr(gamma)
 
     def fix_bn(self):
-        for m in self.modules():
-            if isinstance(m, nn.BatchNorm2d):
-                m.eval()
-                m.weight.requires_grad = False
-                m.bias.requires_grad = False
+        """
+        修复神经网络中的一些层，以确保在模型的推理（评估）模式下进行正确的处理
+        @return:
+        """
+        # 遍历模型中的所有模块
+        for module in self.modules():
+            # 如果模块是 BatchNorm2d 层
+            if isinstance(module, nn.BatchNorm2d):
+                # 设置 BatchNorm 层为评估模式
+                module.eval()
+                # 禁用 BatchNorm 层权重的梯度更新
+                module.weight.requires_grad = False
+                # 禁用 BatchNorm 层偏置的梯度更新
+                module.bias.requires_grad = False
 
-            if isinstance(m, LIFNeuron) or isinstance(m, IFNeuron):
+            # 如果模块是 LIFNeuron 或 IFNeuron 层
+            if isinstance(module, LIFNeuron) or isinstance(module, IFNeuron):
+                # 如果设置允许训练阈值（Vth）
                 if self.snn_setting['train_Vth']:
-                    m.Vth.requires_grad = False
+                    # 禁用阈值（Vth）的梯度更新
+                    module.Vth.requires_grad = False

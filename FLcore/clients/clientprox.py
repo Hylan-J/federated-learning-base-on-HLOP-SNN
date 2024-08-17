@@ -1,90 +1,207 @@
-import torch
-import numpy as np
 import time
 import copy
-import torch.nn as nn
+
+import numpy as np
+from progress.bar import Bar
+import torch
+import torch.nn.functional as F
+
+from ..meter import AverageMeter
 from ..optimizers.PerturbedGradientDescent import PerturbedGradientDescent
 from ..clients.clientbase import Client
+from ..utils import accuracy
+from ..utils.model_utils import reset_net
 
 
 class clientProx(Client):
-    def __init__(self, args, id, xtrain, ytrain, xtest, ytest, model, **kwargs):
-        super().__init__(args, id, xtrain, ytrain, xtest, ytest, model, **kwargs)
+    def __init__(self, args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs):
+        super().__init__(args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs)
         self.mu = args.mu
         self.global_params = copy.deepcopy(list(self.local_model.parameters()))
-        self.loss = nn.CrossEntropyLoss()
         self.optimizer = PerturbedGradientDescent(self.local_model.parameters(), lr=self.learning_rate, mu=self.mu)
         self.learning_rate_scheduler = torch.optim.lr_scheduler.ExponentialLR(
             optimizer=self.optimizer,
             gamma=args.learning_rate_decay_gamma
         )
 
-    def train(self):
-        trainloader = self.load_train_data()
-        start_time = time.time()
-
-        # self.model.to(self.device)
+    def train(self, task_id, bptt, ottt):
+        # 本地模型开启训练模式
         self.local_model.train()
 
         max_local_epochs = self.local_epochs
         if self.train_slow:
             max_local_epochs = np.random.randint(1, max_local_epochs // 2)
 
-        for epoch in range(max_local_epochs):
-            for x, y in trainloader:
-                if type(x) == type([]):
-                    x[0] = x[0].to(self.device)
-                else:
-                    x = x.to(self.device)
-                y = y.to(self.device)
-                if self.train_slow:
-                    time.sleep(0.1 * np.abs(np.random.rand()))
-                output = self.local_model(x)
-                loss = self.loss(output, y)
-                self.optimizer.zero_grad()
-                loss.backward()
-                self.optimizer.step(self.global_params, self.device)
-
-        # self.model.cpu()
-
-        if self.learning_rate_decay:
-            self.learning_rate_scheduler.step()
-
-        self.train_time_cost['num_rounds'] += 1
+        start_time = time.time()
+        super().train_metrics(task_id, bptt, ottt)
         self.train_time_cost['total_cost'] += time.time() - start_time
+        self.train_time_cost['num_rounds'] += 1
 
-
-    def set_parameters(self, model):
-        for new_param, global_param, param in zip(model.parameters(), self.global_params, self.local_model.parameters()):
+    def set_parameters(self, global_model):
+        """
+        从服务器接收到全局的模型更新本地的模型
+        @param global_model: 全局的模型
+        @return:
+        """
+        for new_param, global_param, param in zip(global_model.parameters(), self.global_params,
+                                                  self.local_model.parameters()):
             global_param.data = new_param.data.clone()
             param.data = new_param.data.clone()
 
-    def train_metrics(self):
-        trainloader = self.load_train_data()
-        # self.model = self.load_model('model')
-        # self.model.to(self.device)
+    def train_metrics(self, task_id, bptt, ottt, **kwargs):
+        # 开启模型评估模式
         self.local_model.eval()
 
+        # 获取对应任务的训练集和测试集
+        xtrain, ytrain = self.xtrain[task_id], self.ytrain[task_id]
+        if task_id != 0:
+            self.local_model.fix_bn()
+
+        batch_time = AverageMeter()
+        data_time = AverageMeter()
+        losses = AverageMeter()
+        top1 = AverageMeter()
+        top5 = AverageMeter()
+        end = time.time()
+
+        bar = Bar('Client {:3d} Training'.format(self.id), max=((xtrain.size(0) - 1) // self.batch_size + 1))
+
         train_num = 0
-        losses = 0
-        with torch.no_grad():
-            for x, y in trainloader:
-                if type(x) == type([]):
-                    x[0] = x[0].to(self.device)
+        train_acc = 0
+        train_loss = 0
+        batch_idx = 0
+
+        samples_index = np.arange(xtrain.size(0))
+        np.random.shuffle(samples_index)
+
+        for local_epoch in range(1, self.local_epochs + 1):
+            for i in range(0, len(samples_index), self.batch_size):
+                # 如果可以获取完整的批次，那么就获取完整批次
+                if i + self.batch_size <= len(samples_index):
+                    index = samples_index[i: i + self.batch_size]
+                # 如果没有完整的批次可供获取，那么获取所有剩下的
                 else:
-                    x = x.to(self.device)
-                y = y.to(self.device)
-                output = self.local_model(x)
-                loss = self.loss(output, y)
+                    index = samples_index[i:]
+                batch_idx += 1
 
-                gm = torch.cat([p.data.view(-1) for p in self.global_params], dim=0)
-                pm = torch.cat([p.data.view(-1) for p in self.local_model.parameters()], dim=0)
-                loss += 0.5 * self.mu * torch.norm(gm-pm, p=2)
+                # 获取一个批次的数据和标签
+                x, label = xtrain[index].float().to(self.device), ytrain[index].to(self.device)
 
-                train_num += y.shape[0]
-                losses += loss.item() * y.shape[0]
+                if ottt:
+                    total_loss = 0.
+                    if not self.args.online_update:
+                        self.optimizer.zero_grad()
+                    for t in range(self.timesteps):
+                        if self.args.online_update:
+                            self.optimizer.zero_grad()
+                        init = (t == 0)
+                        if task_id == 0:
+                            flag = not (self.args.baseline and (local_epoch <= self.args.hlop_start_epochs))
+                            out_fr = self.local_model(x, task_id, projection=False, update_hlop=flag, init=init)
+                        else:
+                            flag = not (self.args.baseline or (local_epoch <= self.args.hlop_start_epochs))
+                            out_fr = self.local_model(x, task_id, projection=not self.args.baseline,
+                                                      proj_id_list=[0],
+                                                      update_hlop=flag, fix_subspace_id_list=[0], init=init)
+                        if t == 0:
+                            total_fr = out_fr.clone().detach()
+                        else:
+                            total_fr += out_fr.clone().detach()
+                        loss = F.cross_entropy(out_fr, label) / self.timesteps
+                        gm = torch.cat([p.data.view(-1) for p in self.global_params], dim=0)
+                        pm = torch.cat([p.data.view(-1) for p in self.local_model.parameters()], dim=0)
+                        loss += 0.5 * self.mu * torch.norm(gm - pm, p=2)
+                        loss.backward()
+                        total_loss += loss.detach()
+                        if self.args.online_update:
+                            if self.fed_algorithm == 'SCAFFOLD':
+                                # self.optimizer.step(self.global_controls, self.local_controls)
+                                self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
 
-        # self.model.cpu()
-        # self.save_model(self.model, 'model')
+                            else:
+                                self.optimizer.step()
+                    if not self.args.online_update:
+                        if self.fed_algorithm == 'SCAFFOLD':
+                            self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
+                        else:
+                            self.optimizer.step()
+                    train_loss += total_loss.item() * label.numel()
+                    out = total_fr
+                elif bptt:
+                    self.optimizer.zero_grad()
+                    if task_id == 0:
+                        flag = not (self.args.baseline and (local_epoch <= self.args.hlop_start_epochs))
+                        out = self.local_model(x, task_id, projection=False, update_hlop=flag)
+                    else:
+                        flag = not (self.args.baseline or (local_epoch <= self.args.hlop_start_epochs))
+                        out = self.local_model(x, task_id, projection=not self.args.baseline, proj_id_list=[0],
+                                               update_hlop=flag, fix_subspace_id_list=[0])
+                    loss = F.cross_entropy(out, label)
+                    gm = torch.cat([p.data.view(-1) for p in self.global_params], dim=0)
+                    pm = torch.cat([p.data.view(-1) for p in self.local_model.parameters()], dim=0)
+                    loss += 0.5 * self.mu * torch.norm(gm - pm, p=2)
+                    loss.backward()
+                    if self.fed_algorithm == 'SCAFFOLD':
+                        self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
+                    else:
+                        self.optimizer.step()
+                    reset_net(self.local_model)
+                    train_loss += loss.item() * label.numel()
+                else:
+                    x = x.unsqueeze(1)
+                    x = x.repeat(1, self.timesteps, 1, 1, 1)
+                    self.optimizer.zero_grad()
 
-        return losses, train_num
+                    if task_id == 0:
+                        flag = not (self.args.baseline and (local_epoch <= self.args.hlop_start_epochs))
+                        out = self.local_model(x, task_id, projection=False, update_hlop=flag)
+
+                    else:
+                        flag = not (self.args.baseline or (local_epoch <= self.args.hlop_start_epochs))
+                        out = self.local_model(x, task_id, projection=not self.args.baseline, proj_id_list=[0],
+                                               update_hlop=flag, fix_subspace_id_list=[0])
+                    loss = F.cross_entropy(out, label)
+
+                    if self.fed_algorithm == 'SCAFFOLD':
+                        self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
+                    else:
+                        self.optimizer.step()
+                    gm = torch.cat([p.data.view(-1) for p in self.global_params], dim=0)
+                    pm = torch.cat([p.data.view(-1) for p in self.local_model.parameters()], dim=0)
+                    loss += 0.5 * self.mu * torch.norm(gm - pm, p=2)
+                    loss.backward()
+                    train_loss += loss.item() * label.numel()
+
+                # measure accuracy and record loss
+                prec1, prec5 = accuracy(out.data, label.data, topk=(1, 5))
+                losses.update(loss, x.size(0))
+                top1.update(prec1.item(), x.size(0))
+                top5.update(prec5.item(), x.size(0))
+
+                train_num += label.numel()
+                train_acc += (out.argmax(1) == label).float().sum().item()
+
+                # measure elapsed time
+                batch_time.update(time.time() - end)
+                end = time.time()
+
+                # plot progress
+                bar.suffix = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
+                    batch=batch_idx,
+                    size=((xtrain.size(0) - 1) // self.batch_size + 1),
+                    data=data_time.avg,
+                    bt=batch_time.avg,
+                    total=bar.elapsed_td,
+                    eta=bar.eta_td,
+                    loss=losses.avg,
+                    top1=top1.avg,
+                    top5=top5.avg,
+                )
+                bar.next()
+        bar.finish()
+
+        train_loss /= train_num
+        train_acc /= train_num
+        self.learning_rate_scheduler.step()
+
+        return train_loss, train_acc, train_num

@@ -10,6 +10,7 @@ import torch
 import torchvision
 
 from FLcore.servers.serveravg import FedAvg
+from FLcore.servers.serverprox import FedProx
 from FLcore.servers.serverscaffold import SCAFFOLD
 
 from FLcore.utils.prepare_utils import prepare_dataset, prepare_model
@@ -38,7 +39,8 @@ def run(args):
             server = FedAvg(args, xtrain, ytrain, xtest, ytest, taskcla, model.to(args.device), i)
         elif args.fed_algorithm == 'SCAFFOLD':
             server = SCAFFOLD(args, xtrain, ytrain, xtest, ytest, taskcla, model.to(args.device), i)
-
+        elif args.fed_algorithm == 'FedProx':
+            server = FedProx(args, xtrain, ytrain, xtest, ytest, taskcla, model.to(args.device), i)
         server.train(args.experiment_name, True)
 
         time_list.append(time.time() - start)
@@ -110,6 +112,8 @@ if __name__ == "__main__":
     parser.add_argument("--client_learning_rate", type=float, default=0.005, help="客户端学习率")
     parser.add_argument("--learning_rate_decay", type=bool, default=False)
     parser.add_argument("--learning_rate_decay_gamma", type=float, default=0.99)
+
+    parser.add_argument('-mu', "--mu", type=float, default=0.0)
     # 实际参数？
     parser.add_argument('-cdr', "--client_drop_rate", type=float, default=0.0, help="参与训练但中途退出的客户端比例")
     parser.add_argument('-tsr', "--train_slow_rate", type=float, default=0.0, help="本地训练时，速度慢的客户端比例")

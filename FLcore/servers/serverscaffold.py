@@ -24,9 +24,8 @@ class SCAFFOLD(Server):
         print("Finished creating server and clients.")
 
         # 全局控制变量
-        self.global_controls = [torch.zeros_like(param) for param in self.global_model.parameters()]
-        """for param in self.global_model.parameters():
-            self.global_controls.append(torch.zeros_like(param))"""
+        # self.global_controls = [torch.zeros_like(param) for param in self.global_model.parameters()]
+        self.global_controls = []
 
         self.learning_rate = args.server_learning_rate
         self.time_cost = []
@@ -58,17 +57,22 @@ class SCAFFOLD(Server):
                 if task_count == 0:
                     self.global_model.add_hlop_subspace(hlop_out_num)
                     self.global_model.to(self.device)
+                    # self.global_controls = [torch.zeros_like(param) for param in self.global_model.parameters()]
                     for client in self.clients:
                         client.local_model.add_hlop_subspace(hlop_out_num)
                         client.local_model.to(self.device)
+                        # client.local_controls = [torch.zeros_like(param) for param in client.local_model.parameters()]
                 else:
                     if task_count % 3 == 0:
                         hlop_out_num_inc[0] -= 20
                         hlop_out_num_inc[1] -= 20
                         hlop_out_num_inc[2] -= 20
                     self.global_model.add_hlop_subspace(hlop_out_num_inc)
+                    self.global_controls = [torch.zeros_like(param) for param in self.global_model.parameters()]
                     for client in self.clients:
                         client.local_model.add_hlop_subspace(hlop_out_num_inc)
+                        client.local_controls = [torch.zeros_like(param) for param in client.local_model.parameters()]
+
             elif experiment_name == 'cifar':  # cifar 实验
                 if task_count == 0:
                     self.global_model.add_hlop_subspace(hlop_out_num)
@@ -119,7 +123,7 @@ class SCAFFOLD(Server):
             for global_round in range(1, self.global_rounds + 1):
                 start_time = time.time()
                 self.select_clients(task_id)
-                self.send_models()
+                # self.send_models()
 
                 for client in self.selected_clients:
                     client.train(task_id, bptt, ottt)
@@ -248,7 +252,7 @@ class SCAFFOLD(Server):
         global_controls = copy.deepcopy(self.global_controls)
         # 计算聚合后的全局模型和控制参数
         for idx in self.received_info['client_ids']:
-            delta_model, delta_control = self.clients[idx].calculate_delta_model_and_control_param(task_id)
+            delta_model, delta_control = self.clients[idx].delta_yc(task_id)
             for global_model_param, local_model_param in zip(global_model.parameters(), delta_model):
                 global_model_param.data += local_model_param.data.clone() / self.num_join_clients * self.learning_rate
             for global_control_param, local_control_param in zip(global_controls, delta_control):
