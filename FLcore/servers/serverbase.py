@@ -94,6 +94,11 @@ class Server(object):
         self.logs_path = os.path.join(self.root_path, 'logs')
         self.models_path = os.path.join(self.root_path, 'models')
 
+    # ------------------------------------------------------------------------------------------------------------------
+    # 设置相关客户端操作
+    # ------------------------------------------------------------------------------------------------------------------
+
+    # 生成现有的客户端
     def set_clients(self, clientObj, xtrain, ytrain, xtest, ytest, model):
         for i, train_slow, send_slow in zip(range(self.num_clients), self.train_slow_clients, self.send_slow_clients):
             client = clientObj(args=self.args, id=i,
@@ -103,6 +108,7 @@ class Server(object):
                                train_slow=train_slow, send_slow=send_slow)
             self.clients.append(client)
 
+    # 生成新增的客户端
     def set_new_clients(self, clientObj, xtrain, ytrain, xtest, ytest):
         for i in range(self.num_clients, self.num_clients + self.num_new_clients):
             client = clientObj(args=self.args, id=i,
@@ -112,6 +118,7 @@ class Server(object):
                                train_slow=False, send_slow=False)
             self.new_clients.append(client)
 
+    # 设置train_slow和send_slow的客户端
     def set_slow_clients(self):
         indexes = [i for i in range(self.num_clients)]  # 获取所有客户端的索引
 
@@ -133,6 +140,11 @@ class Server(object):
         for i in send_slow_indexes:
             self.send_slow_clients[i] = True
 
+    # ------------------------------------------------------------------------------------------------------------------
+    # 联邦主要操作
+    # ------------------------------------------------------------------------------------------------------------------
+
+    # 挑选客户端
     def select_clients(self, task_id):
         # 如果随机加入客户端的比例大于0
         if self.random_join_ratio:
@@ -146,6 +158,21 @@ class Server(object):
         selective_clients = [client for client in self.clients if task_id in client.local_tasks]
         self.selected_clients = list(np.random.choice(selective_clients, self.current_num_join_clients, replace=False))
 
+    # 向客户端发送全局模型
+    def send_models(self):
+        """
+        向客户端发送全局模型
+        @return:
+        """
+        # 断言服务器的客户端数不为零
+        assert (len(self.selected_clients) > 0)
+        for client in self.selected_clients:
+            start_time = time.time()
+            client.set_parameters(self.global_model)
+            client.send_time_cost['total_cost'] += 2 * (time.time() - start_time)
+            client.send_time_cost['num_rounds'] += 1
+
+    # 从客户端接收训练后的本地模型
     def receive_models(self):
         """
         从选中训练的客户端接收其本地模型
@@ -179,37 +206,26 @@ class Server(object):
         for idx, train_samples in enumerate(self.received_info['client_weights']):
             self.received_info['client_weights'][idx] = train_samples / total_client_train_samples
 
+    # 根据本地模型聚合全局模型
     def aggregate_parameters(self):
         """
-        根据
+        根据本地模型聚合全局模型
         @return:
         """
         # 断言客户端上传的模型数量不为零
         assert (len(self.received_info['client_models']) > 0)
-
         self.global_model = copy.deepcopy(self.received_info['client_models'][0])
-
+        # 将全局模型的参数值清空
         for param in self.global_model.parameters():
             param.data.zero_()
-
+        # 获取全局模型的参数值
         for weight, model in zip(self.received_info['client_weights'], self.received_info['client_models']):
             for server_param, client_param in zip(self.global_model.parameters(), model.parameters()):
                 server_param.data += client_param.data.clone() * weight
 
-    def send_models(self):
-        """
-        向客户端发送全局模型
-        @return:
-        """
-        # 断言服务器的客户端数不为零
-        assert (len(self.clients) > 0)
-
-        for client in self.clients:
-            start_time = time.time()
-            client.set_parameters(self.global_model)
-            client.send_time_cost['num_rounds'] += 1
-            client.send_time_cost['total_cost'] += 2 * (time.time() - start_time)
-
+    # ------------------------------------------------------------------------------------------------------------------
+    # 训练、评估相关操作
+    # ------------------------------------------------------------------------------------------------------------------
     def train_metrics(self, task_id, bptt, ottt):
         if self.eval_new_clients and self.num_new_clients > 0:
             return [0], [1], [0]
@@ -247,7 +263,7 @@ class Server(object):
     def evaluate(self, task_id: int, bptt: bool, ottt: bool, acc=None, loss=None):
         test_losses, test_accuracies, test_num_samples = self.test_metrics(task_id, bptt, ottt)
         # train_losses, train_accuracies, train_num_samples = self.train_metrics(task_id, bptt, ottt)
-        test_loss_avg = sum(test_losses)*1.0/len(test_num_samples)
+        test_loss_avg = sum(test_losses) * 1.0 / len(test_num_samples)
         test_acc_avg = sum(test_accuracies) * 1.0 / len(test_num_samples)
         # train_loss_avg = sum(train_losses) * 1.0 / sum(train_num_samples)
 
@@ -294,45 +310,6 @@ class Server(object):
                 raise NotImplementedError
         return True
 
-    def call_dlg(self, R):
-        # items = []
-        cnt = 0
-        psnr_val = 0
-        for cid, client_model in zip(self.received_info[''], self.received_info['']):
-            client_model.eval()
-            origin_grad = []
-            for gp, pp in zip(self.global_model.parameters(), client_model.parameters()):
-                origin_grad.append(gp.data - pp.data)
-
-            target_inputs = []
-            trainloader = self.clients[cid].load_train_data()
-            with torch.no_grad():
-                for i, (x, y) in enumerate(trainloader):
-                    if i >= self.batch_num_per_client:
-                        break
-
-                    if type(x) == type([]):
-                        x[0] = x[0].to(self.device)
-                    else:
-                        x = x.to(self.device)
-                    y = y.to(self.device)
-                    output = client_model(x)
-                    target_inputs.append((x, output))
-
-            d = DLG(client_model, origin_grad, target_inputs)
-            if d is not None:
-                psnr_val += d
-                cnt += 1
-
-            # items.append((client_model, origin_grad, target_inputs))
-
-        if cnt > 0:
-            print('PSNR value is {:.2f} dB'.format(psnr_val / cnt))
-        else:
-            print('PSNR error')
-
-        # self.save_item(items, f'DLG_{R}')
-
     def fine_tuning_new_clients(self):
         for client in self.new_clients:
             client.set_parameters(self.global_model)
@@ -368,7 +345,98 @@ class Server(object):
 
         return ids, num_samples, tot_correct, tot_auc
 
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 数据保存、加载操作 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # ------------------------------------------------------------------------------------------------------------------
+    # HLOP_SNN相关操作
+    # ------------------------------------------------------------------------------------------------------------------
+    def adjust_to_HLOP_SNN_before_train_task(self, experiment_name, ncla, task_count,
+                                             hlop_out_num, hlop_out_num_inc, hlop_out_num_inc1):
+        """
+        训练task之前调整HLOP-SNN
+        @param experiment_name:
+        @param task_count:
+        @param hlop_out_num:
+        @param hlop_out_num_inc:
+        @param hlop_out_num_inc1:
+        @param ncla:
+        @return:
+        """
+        if experiment_name.startswith('pmnist'):  # pmnist/pmnist_bptt/pmnist_ottt 实验
+            if task_count == 0:
+                self.global_model.add_hlop_subspace(hlop_out_num)
+                self.global_model.to(self.device)
+                for client in self.clients:
+                    client.local_model.add_hlop_subspace(hlop_out_num)
+                    client.local_model.to(self.device)
+            else:
+                if task_count % 3 == 0:
+                    hlop_out_num_inc[0] -= 20
+                    hlop_out_num_inc[1] -= 20
+                    hlop_out_num_inc[2] -= 20
+                self.global_model.add_hlop_subspace(hlop_out_num_inc)
+                for client in self.clients:
+                    client.local_model.add_hlop_subspace(hlop_out_num_inc)
+        elif experiment_name == 'cifar':  # cifar 实验
+            if task_count == 0:
+                self.global_model.add_hlop_subspace(hlop_out_num)
+                self.global_model.to(self.device)
+                for client in self.clients:
+                    client.local_model.add_hlop_subspace(hlop_out_num)
+                    client.local_model.to(self.device)
+            else:
+                self.global_model.add_classifier(ncla)
+                self.global_model.add_hlop_subspace(hlop_out_num_inc)
+                for client in self.clients:
+                    client.local_model.add_classifier(ncla)
+                    client.local_model.add_hlop_subspace(hlop_out_num_inc)
+        elif experiment_name == 'miniimagenet':  # miniimagenet 实验
+            if task_count == 0:
+                self.global_model.add_hlop_subspace(hlop_out_num)
+                self.global_model.to(self.device)
+                for client in self.clients:
+                    client.local_model.add_hlop_subspace(hlop_out_num)
+                    client.local_model.to(self.device)
+            else:
+                self.global_model.add_classifier(ncla)
+                for client in self.clients:
+                    client.local_model.add_classifier(ncla)
+                if task_count < 6:
+                    self.global_model.add_hlop_subspace(hlop_out_num_inc)
+                    for client in self.clients:
+                        client.local_model.add_hlop_subspace(hlop_out_num_inc)
+                else:
+                    self.global_model.add_hlop_subspace(hlop_out_num_inc1)
+                    for client in self.clients:
+                        client.local_model.add_hlop_subspace(hlop_out_num_inc1)
+        elif experiment_name.startswith('fivedataset'):  # fivedataset/fivedataset_domain 实验
+            if task_count == 0:
+                self.global_model.add_hlop_subspace(hlop_out_num)
+                self.global_model.to(self.device)
+                for client in self.clients:
+                    client.local_model.add_hlop_subspace(hlop_out_num)
+                    client.local_model.to(self.device)
+            else:
+                self.global_model.add_classifier(ncla)
+                self.global_model.add_hlop_subspace(hlop_out_num_inc)
+                for client in self.clients:
+                    client.local_model.add_classifier(ncla)
+                    client.local_model.add_hlop_subspace(hlop_out_num_inc)
+
+    def adjust_to_HLOP_SNN_after_train_task(self):
+        """
+        训练task之后调整HLOP-SNN
+        @return:
+        """
+        self.global_model.to('cpu')
+        self.global_model.merge_hlop_subspace()
+        self.global_model.to(self.device)
+        for client in self.clients:
+            client.local_model.to('cpu')
+            client.local_model.merge_hlop_subspace()
+            client.local_model.to(self.device)
+
+    # ------------------------------------------------------------------------------------------------------------------
+    # 数据保存、加载操作
+    # ------------------------------------------------------------------------------------------------------------------
     def save_global_model(self, model_name):
         """
         保存全局模型

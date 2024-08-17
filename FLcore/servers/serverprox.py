@@ -6,7 +6,7 @@ from tensorboardX import SummaryWriter
 
 from ..clients.clientprox import clientProx
 from ..servers.serverbase import Server
-from ..utils.prepare_utils import prepare_bptt_ottt, prepare_hlop_out_XXX
+from ..utils.prepare_utils import prepare_bptt_ottt, prepare_hlop_out
 
 
 class FedProx(Server):
@@ -25,7 +25,7 @@ class FedProx(Server):
 
     def train(self, experiment_name: str, replay: bool):
         bptt, ottt = prepare_bptt_ottt(experiment_name)
-        hlop_out_num, hlop_out_num_inc, hlop_out_num_inc1 = prepare_hlop_out_XXX(experiment_name)
+        hlop_out_num, hlop_out_num_inc, hlop_out_num_inc1 = prepare_hlop_out(experiment_name)
 
         if bptt or ottt:
             replay = False

@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# @Description : 联邦学习联邦平均（fedavg）客户端类
-
+# @Description : FedAvg算法的客户端类
 import time
 
 import numpy as np
@@ -16,15 +15,11 @@ class clientAVG(Client):
         super().__init__(args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs)
 
     def train(self, task_id, bptt, ottt):
-        # 本地模型开启训练模式
-        self.local_model.train()
-
         if self.train_slow:
             self.local_epochs = np.random.randint(1, self.local_epochs // 2)
 
         start_time = time.time()
         super().train_metrics(task_id, bptt, ottt)
-
         self.train_time_cost['total_cost'] += time.time() - start_time
         self.train_time_cost['num_rounds'] += 1
 

@@ -30,6 +30,7 @@ torch.manual_seed(0)
 def run(args):
     xtrain, ytrain, xtest, ytest, taskcla = prepare_dataset(args.experiment_name, args.dataset_path, 0)
     model = prepare_model(args.experiment_name, args, 10)
+    model = model.to(args.device)
     time_list = []
     for i in range(args.prev, args.times):
         print(f"\n============= Running time: {i}th =============")
@@ -37,15 +38,15 @@ def run(args):
         start = time.time()
 
         if args.fed_algorithm == 'FedAvg':
-            server = FedAvg(args, xtrain, ytrain, xtest, ytest, taskcla, model.to(args.device), i)
+            server = FedAvg(args, xtrain, ytrain, xtest, ytest, taskcla, model, i)
         elif args.fed_algorithm == 'SCAFFOLD':
-            server = SCAFFOLD(args, xtrain, ytrain, xtest, ytest, taskcla, model.to(args.device), i)
+            server = SCAFFOLD(args, xtrain, ytrain, xtest, ytest, taskcla, model, i)
         elif args.fed_algorithm == 'FedProx':
-            server = FedProx(args, xtrain, ytrain, xtest, ytest, taskcla, model.to(args.device), i)
+            server = FedProx(args, xtrain, ytrain, xtest, ytest, taskcla, model, i)
         elif args.fed_algorithm == 'FedDyn':
-            server = FedDyn(args, xtrain, ytrain, xtest, ytest, taskcla, model.to(args.device), i)
+            server = FedDyn(args, xtrain, ytrain, xtest, ytest, taskcla, model, i)
 
-        server.train(args.experiment_name, True)
+        server.train(args.experiment_name, True, True)
 
         time_list.append(time.time() - start)
 

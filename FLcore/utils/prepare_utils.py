@@ -15,7 +15,7 @@ def prepare_bptt_ottt(experiment_name: str):
     return bptt, ottt
 
 
-def prepare_hlop_out_XXX(experiment_name: str):
+def prepare_hlop_out(experiment_name: str):
     """
     根据实验名称准备hlop_out_XXX相关的值
     @param experiment_name:
