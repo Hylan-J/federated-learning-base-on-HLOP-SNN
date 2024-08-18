@@ -4,7 +4,6 @@ import copy
 import numpy as np
 from progress.bar import Bar
 import torch
-import torch.nn.functional as F
 
 from ..meter import AverageMeter
 from ..optimizers.PerturbedGradientDescent import PerturbedGradientDescent
@@ -16,7 +15,7 @@ from ..utils.model_utils import reset_net
 class clientProx(Client):
     def __init__(self, args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs):
         super().__init__(args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs)
-        self.mu = args.mu
+        self.mu = args.fed_mu
         self.global_params = copy.deepcopy(list(self.local_model.parameters()))
         self.optimizer = PerturbedGradientDescent(self.local_model.parameters(), lr=self.learning_rate, mu=self.mu)
         self.learning_rate_scheduler = torch.optim.lr_scheduler.ExponentialLR(
@@ -25,9 +24,6 @@ class clientProx(Client):
         )
 
     def train(self, task_id, bptt, ottt):
-        # 本地模型开启训练模式
-        self.local_model.train()
-
         max_local_epochs = self.local_epochs
         if self.train_slow:
             max_local_epochs = np.random.randint(1, max_local_epochs // 2)
@@ -50,7 +46,7 @@ class clientProx(Client):
 
     def train_metrics(self, task_id, bptt, ottt, **kwargs):
         # 开启模型评估模式
-        self.local_model.eval()
+        self.local_model.train()
 
         # 获取对应任务的训练集和测试集
         xtrain, ytrain = self.xtrain[task_id], self.ytrain[task_id]
@@ -85,7 +81,7 @@ class clientProx(Client):
                 batch_idx += 1
 
                 # 获取一个批次的数据和标签
-                x, label = xtrain[index].float().to(self.device), ytrain[index].to(self.device)
+                x, y = xtrain[index].float().to(self.device), ytrain[index].to(self.device)
 
                 if ottt:
                     total_loss = 0.
@@ -107,25 +103,17 @@ class clientProx(Client):
                             total_fr = out_fr.clone().detach()
                         else:
                             total_fr += out_fr.clone().detach()
-                        loss = F.cross_entropy(out_fr, label) / self.timesteps
+                        loss = self.loss(out_fr, y) / self.timesteps
                         gm = torch.cat([p.data.view(-1) for p in self.global_params], dim=0)
                         pm = torch.cat([p.data.view(-1) for p in self.local_model.parameters()], dim=0)
                         loss += 0.5 * self.mu * torch.norm(gm - pm, p=2)
                         loss.backward()
                         total_loss += loss.detach()
                         if self.args.online_update:
-                            if self.fed_algorithm == 'SCAFFOLD':
-                                # self.optimizer.step(self.global_controls, self.local_controls)
-                                self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
-
-                            else:
-                                self.optimizer.step()
-                    if not self.args.online_update:
-                        if self.fed_algorithm == 'SCAFFOLD':
-                            self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
-                        else:
                             self.optimizer.step()
-                    train_loss += total_loss.item() * label.numel()
+                    if not self.args.online_update:
+                        self.optimizer.step()
+                    train_loss += total_loss.item() * y.numel()
                     out = total_fr
                 elif bptt:
                     self.optimizer.zero_grad()
@@ -136,17 +124,14 @@ class clientProx(Client):
                         flag = not (self.args.baseline or (local_epoch <= self.args.hlop_start_epochs))
                         out = self.local_model(x, task_id, projection=not self.args.baseline, proj_id_list=[0],
                                                update_hlop=flag, fix_subspace_id_list=[0])
-                    loss = F.cross_entropy(out, label)
+                    loss = self.loss(out, y)
                     gm = torch.cat([p.data.view(-1) for p in self.global_params], dim=0)
                     pm = torch.cat([p.data.view(-1) for p in self.local_model.parameters()], dim=0)
                     loss += 0.5 * self.mu * torch.norm(gm - pm, p=2)
                     loss.backward()
-                    if self.fed_algorithm == 'SCAFFOLD':
-                        self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
-                    else:
-                        self.optimizer.step()
+                    self.optimizer.step()
                     reset_net(self.local_model)
-                    train_loss += loss.item() * label.numel()
+                    train_loss += loss.item() * y.numel()
                 else:
                     x = x.unsqueeze(1)
                     x = x.repeat(1, self.timesteps, 1, 1, 1)
@@ -160,26 +145,23 @@ class clientProx(Client):
                         flag = not (self.args.baseline or (local_epoch <= self.args.hlop_start_epochs))
                         out = self.local_model(x, task_id, projection=not self.args.baseline, proj_id_list=[0],
                                                update_hlop=flag, fix_subspace_id_list=[0])
-                    loss = F.cross_entropy(out, label)
+                    loss = self.loss(out, y)
 
-                    if self.fed_algorithm == 'SCAFFOLD':
-                        self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
-                    else:
-                        self.optimizer.step()
+                    self.optimizer.step()
                     gm = torch.cat([p.data.view(-1) for p in self.global_params], dim=0)
                     pm = torch.cat([p.data.view(-1) for p in self.local_model.parameters()], dim=0)
                     loss += 0.5 * self.mu * torch.norm(gm - pm, p=2)
                     loss.backward()
-                    train_loss += loss.item() * label.numel()
+                    train_loss += loss.item() * y.numel()
 
                 # measure accuracy and record loss
-                prec1, prec5 = accuracy(out.data, label.data, topk=(1, 5))
+                prec1, prec5 = accuracy(out.data, y.data, topk=(1, 5))
                 losses.update(loss, x.size(0))
                 top1.update(prec1.item(), x.size(0))
                 top5.update(prec5.item(), x.size(0))
 
-                train_num += label.numel()
-                train_acc += (out.argmax(1) == label).float().sum().item()
+                train_num += y.numel()
+                train_acc += (out.argmax(1) == y).float().sum().item()
 
                 # measure elapsed time
                 batch_time.update(time.time() - end)

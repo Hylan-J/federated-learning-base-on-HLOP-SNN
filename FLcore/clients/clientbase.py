@@ -9,7 +9,6 @@ import time
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from progress.bar import Bar
 
 from ..meter.AverageMeter import AverageMeter
@@ -51,10 +50,12 @@ class Client(object):
 
         # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 模型训练相关参数 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         # 本地模型
+        # 损失
         # 优化器
         # 学习率
         # 学习率调节器
         self.local_model = copy.deepcopy(local_model)
+        self.loss = nn.CrossEntropyLoss()
         self.optimizer = None
         self.learning_rate = args.client_learning_rate
         self.learning_rate_decay = args.learning_rate_decay
@@ -287,8 +288,7 @@ class Client(object):
                                                                                    gamma=self.args.gamma)
                 elif self.args.lr_scheduler == 'CosALR':
                     # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.T_max)
-                    lr_lambda = lambda cur_epoch: (
-                                                          cur_epoch + 1) / self.args.warmup if cur_epoch < self.args.warmup else 0.5 * (
+                    lr_lambda = lambda cur_epoch: (cur_epoch + 1) / self.args.warmup if cur_epoch < self.args.warmup else 0.5 * (
                             1 + math.cos(
                         (cur_epoch - self.args.warmup) / (self.args.T_max - self.args.warmup) * math.pi))
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lr_lambda)
@@ -342,9 +342,9 @@ class Client(object):
         samples_index = np.arange(xtrain.size(0))
         np.random.shuffle(samples_index)
 
-        # 本地轮次的操作 --------------------------------------------------------------------------------------------------
+        # 本地轮次的操作
         for local_epoch in range(1, self.local_epochs + 1):
-            # 一个轮次中的批处理操作 ---------------------------------------------------------------------------------------
+            # 一个轮次中的批处理操作
             for i in range(0, len(samples_index), self.batch_size):
                 # 如果可以获取完整的批次，那么就获取完整批次
                 if i + self.batch_size <= len(samples_index):
@@ -355,7 +355,7 @@ class Client(object):
                 batch_idx += 1
 
                 # 获取一个批次的数据和标签
-                x, label = xtrain[index].float().to(self.device), ytrain[index].to(self.device)
+                x, y = xtrain[index].float().to(self.device), ytrain[index].to(self.device)
 
                 if ottt:
                     total_loss = 0.
@@ -370,14 +370,13 @@ class Client(object):
                             out_fr = self.local_model(x, task_id, projection=False, update_hlop=flag, init=init)
                         else:
                             flag = not (self.args.baseline or (local_epoch <= self.args.hlop_start_epochs))
-                            out_fr = self.local_model(x, task_id, projection=not self.args.baseline,
-                                                      proj_id_list=[0],
+                            out_fr = self.local_model(x, task_id, projection=not self.args.baseline, proj_id_list=[0],
                                                       update_hlop=flag, fix_subspace_id_list=[0], init=init)
                         if t == 0:
                             total_fr = out_fr.clone().detach()
                         else:
                             total_fr += out_fr.clone().detach()
-                        loss = F.cross_entropy(out_fr, label) / self.timesteps
+                        loss = self.loss(out_fr, y) / self.timesteps
                         loss.backward()
                         total_loss += loss.detach()
                         if self.args.online_update:
@@ -392,7 +391,7 @@ class Client(object):
                             self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
                         else:
                             self.optimizer.step()
-                    train_loss += total_loss.item() * label.numel()
+                    train_loss += total_loss.item() * y.numel()
                     out = total_fr
                 elif bptt:
                     self.optimizer.zero_grad()
@@ -403,14 +402,14 @@ class Client(object):
                         flag = not (self.args.baseline or (local_epoch <= self.args.hlop_start_epochs))
                         out = self.local_model(x, task_id, projection=not self.args.baseline, proj_id_list=[0],
                                                update_hlop=flag, fix_subspace_id_list=[0])
-                    loss = F.cross_entropy(out, label)
+                    loss = self.loss(out, y)
                     loss.backward()
                     if self.fed_algorithm == 'SCAFFOLD':
                         self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
                     else:
                         self.optimizer.step()
                     reset_net(self.local_model)
-                    train_loss += loss.item() * label.numel()
+                    train_loss += loss.item() * y.numel()
                 else:
                     x = x.unsqueeze(1)
                     x = x.repeat(1, self.timesteps, 1, 1, 1)
@@ -424,22 +423,22 @@ class Client(object):
                         flag = not (self.args.baseline or (local_epoch <= self.args.hlop_start_epochs))
                         out = self.local_model(x, task_id, projection=not self.args.baseline, proj_id_list=[0],
                                                update_hlop=flag, fix_subspace_id_list=[0])
-                    loss = F.cross_entropy(out, label)
+                    loss = self.loss(out, y)
                     loss.backward()
                     if self.fed_algorithm == 'SCAFFOLD':
                         self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
                     else:
                         self.optimizer.step()
-                    train_loss += loss.item() * label.numel()
+                    train_loss += loss.item() * y.numel()
 
                 # measure accuracy and record loss
-                prec1, prec5 = accuracy(out.data, label.data, topk=(1, 5))
+                prec1, prec5 = accuracy(out.data, y.data, topk=(1, 5))
                 losses.update(loss, x.size(0))
                 top1.update(prec1.item(), x.size(0))
                 top5.update(prec5.item(), x.size(0))
 
-                train_num += label.numel()
-                train_acc += (out.argmax(1) == label).float().sum().item()
+                train_num += y.numel()
+                train_acc += (out.argmax(1) == y).float().sum().item()
 
                 # measure elapsed time
                 batch_time.update(time.time() - end)
@@ -490,11 +489,11 @@ class Client(object):
                     x = xtrain[index].float().to(self.device)
                     x = x.unsqueeze(1)
                     x = x.repeat(1, self.timesteps, 1, 1, 1)
-                    label = ytrain[index].to(self.device)
+                    y = ytrain[index].to(self.device)
 
                     self.optimizer.zero_grad()
                     out = self.local_model(x, replay_task, projection=False, update_hlop=False)
-                    loss = F.cross_entropy(out, label)
+                    loss = self.loss(out, y)
                     loss.backward()
                 if self.fed_algorithm == 'SCAFFOLD':
                     self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
@@ -537,8 +536,8 @@ class Client(object):
 
                 if bptt:
                     out = self.local_model(input, task_id, projection=False, update_hlop=False)
-                    loss = F.cross_entropy(out, label)
-                    self.reset_net(self.local_model)
+                    loss = self.loss(out, label)
+                    reset_net(self.local_model)
                 elif ottt:
                     loss = 0.
                     for t in range(self.timesteps):
@@ -548,14 +547,14 @@ class Client(object):
                         else:
                             out_fr = self.local_model(input, task_id, projection=False, update_hlop=False)
                             total_fr += out_fr.clone().detach()
-                        loss += F.cross_entropy(out_fr, label).detach() / self.timesteps
+                        loss += self.loss(out_fr, label).detach() / self.timesteps
                     out = total_fr
                 else:
                     # repeat for time steps
                     input = input.unsqueeze(1)
                     input = input.repeat(1, self.timesteps, 1, 1, 1)
                     out = self.local_model(input, task_id, projection=False, update_hlop=False)
-                    loss = F.cross_entropy(out, label)
+                    loss = self.loss(out, label)
 
                 test_num += label.numel()
                 test_loss += loss.item() * label.numel()

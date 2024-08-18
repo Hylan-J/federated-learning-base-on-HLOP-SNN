@@ -118,9 +118,9 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate_decay", type=bool, default=False)
     parser.add_argument("--learning_rate_decay_gamma", type=float, default=0.99)
 
-    parser.add_argument("--mu", type=float, default=0.0)
-    parser.add_argument("--server_alpha", type=float, default=1.0)
-    parser.add_argument("--server_tau", type=float, default=1.0)
+    parser.add_argument("--fed_mu", type=float, default=0.0)
+    parser.add_argument("--fed_alpha", type=float, default=1.0)
+    parser.add_argument("--fed_tau", type=float, default=1.0)
     # 实际参数？
     parser.add_argument('-cdr', "--client_drop_rate", type=float, default=0.0, help="参与训练但中途退出的客户端比例")
     parser.add_argument('-tsr', "--train_slow_rate", type=float, default=0.0, help="本地训练时，速度慢的客户端比例")
