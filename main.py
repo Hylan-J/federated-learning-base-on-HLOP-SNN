@@ -117,10 +117,13 @@ if __name__ == "__main__":
     parser.add_argument("--client_learning_rate", type=float, default=0.005, help="客户端学习率")
     parser.add_argument("--learning_rate_decay", type=bool, default=False)
     parser.add_argument("--learning_rate_decay_gamma", type=float, default=0.99)
-
-    parser.add_argument("--fed_mu", type=float, default=0.0)
-    parser.add_argument("--fed_alpha", type=float, default=1.0)
-    parser.add_argument("--fed_tau", type=float, default=1.0)
+    # FedDyn 相关参数
+    parser.add_argument("--FedDyn_alpha", type=float, default=1.0)
+    # FedProx 相关参数
+    parser.add_argument("--FedProx_mu", type=float, default=0.1)
+    # MOON 相关参数
+    parser.add_argument("--MOON_tau", type=float, default=1.0)
+    parser.add_argument("--MOON_mu", type=float, default=1.0)
     # 实际参数？
     parser.add_argument('-cdr', "--client_drop_rate", type=float, default=0.0, help="参与训练但中途退出的客户端比例")
     parser.add_argument('-tsr', "--train_slow_rate", type=float, default=0.0, help="本地训练时，速度慢的客户端比例")
@@ -145,7 +148,7 @@ if __name__ == "__main__":
     # 解析命令行参数
     args = parser.parse_args()
 
-    args.root_path = os.path.join('logs', args.experiment_name+time.strftime(" %Y-%m-%d %H：%M：%S"))
+    args.root_path = os.path.join('logs', args.experiment_name + time.strftime(" %Y-%m-%d %H：%M：%S"))
     os.environ["CUDA_VISIBLE_DEVICES"] = args.device_id
 
     if args.device == "cuda" and not torch.cuda.is_available():

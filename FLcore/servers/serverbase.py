@@ -232,7 +232,7 @@ class Server(object):
 
         losses, accuracies, num_samples = [], [], []
         for client in self.selected_clients:
-            client_train_loss, client_train_acc, client_train_num = client.train_metrics(task_id, bptt, ottt)
+            client_train_loss, client_train_acc, client_train_num = client.train_model(task_id, bptt, ottt)
             losses.append(client_train_loss * 1.0)
             accuracies.append(client_train_acc)
             num_samples.append(client_train_num)

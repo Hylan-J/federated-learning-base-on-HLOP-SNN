@@ -17,9 +17,8 @@ class clientAVG(Client):
     def train(self, task_id, bptt, ottt):
         if self.train_slow:
             self.local_epochs = np.random.randint(1, self.local_epochs // 2)
-
         start_time = time.time()
-        super().train_metrics(task_id, bptt, ottt)
+        super().train_model(task_id, bptt, ottt)
         self.train_time_cost['total_cost'] += time.time() - start_time
         self.train_time_cost['num_rounds'] += 1
 

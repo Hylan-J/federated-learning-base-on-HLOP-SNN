@@ -18,10 +18,10 @@ class FedProx(Server):
 
     def train(self, experiment_name: str, replay: bool, HLOP_SNN: bool):
         bptt, ottt = prepare_bptt_ottt(experiment_name)
-        hlop_out_num, hlop_out_num_inc, hlop_out_num_inc1 = prepare_hlop_out(experiment_name)
-
         if bptt or ottt:
             replay = False
+
+        hlop_out_num, hlop_out_num_inc, hlop_out_num_inc1 = prepare_hlop_out(experiment_name)
 
         task_learned = []
         task_count = 0
@@ -39,7 +39,6 @@ class FedProx(Server):
             if HLOP_SNN:
                 self.adjust_to_HLOP_SNN_before_train_task(experiment_name, ncla, task_count,
                                                           hlop_out_num, hlop_out_num_inc, hlop_out_num_inc1)
-
             for client in self.clients:
                 if replay:
                     client.set_replay_data(task_id, ncla)

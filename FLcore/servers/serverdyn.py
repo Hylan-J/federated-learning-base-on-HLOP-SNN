@@ -18,18 +18,15 @@ class FedDyn(Server):
         self.set_clients(clientDyn, self.xtrain, self.ytrain, self.xtest, self.ytest, model)
         self.time_cost = []
 
-        self.alpha = args.fed_alpha
-        """self.server_state = copy.deepcopy(model)
-        for param in self.server_state.parameters():
-            param.data = torch.zeros_like(param.data)"""
+        self.alpha = args.FedDyn_alpha
         self.server_state = None
 
     def train(self, experiment_name: str, replay: bool, HLOP_SNN: bool):
         bptt, ottt = prepare_bptt_ottt(experiment_name)
-        hlop_out_num, hlop_out_num_inc, hlop_out_num_inc1 = prepare_hlop_out(experiment_name)
-
         if bptt or ottt:
             replay = False
+
+        hlop_out_num, hlop_out_num_inc, hlop_out_num_inc1 = prepare_hlop_out(experiment_name)
 
         task_learned = []
         task_count = 0
@@ -70,7 +67,6 @@ class FedDyn(Server):
                     client.train(task_id, bptt, ottt)
                 # ④服务器接收训练后的客户端模型
                 self.receive_models()
-                # self.update_server_state()
                 # ⑤服务器聚合全局模型
                 self.aggregate_parameters()
 
@@ -139,18 +135,18 @@ class FedDyn(Server):
     def aggregate_parameters(self):
         assert (len(self.received_info['client_models']) > 0)
 
+        # 更新server_state的参数值
         model_delta = copy.deepcopy(self.received_info['client_models'][0])
         for param in model_delta.parameters():
             param.data = torch.zeros_like(param.data)
-
         for client_model in self.received_info['client_models']:
             for server_param, client_param, delta_param in zip(self.global_model.parameters(),
                                                                client_model.parameters(), model_delta.parameters()):
                 delta_param.data += (client_param - server_param) / self.num_clients
-
         for state_param, delta_param in zip(self.server_state.parameters(), model_delta.parameters()):
             state_param.data -= self.alpha * delta_param
 
+        # 根据server_state更新global_model的参数值
         self.global_model = copy.deepcopy(self.received_info['client_models'][0])
         for param in self.global_model.parameters():
             param.data = torch.zeros_like(param.data)
@@ -159,18 +155,3 @@ class FedDyn(Server):
                 server_param.data += client_param.data.clone() / self.num_join_clients
         for server_param, state_param in zip(self.global_model.parameters(), self.server_state.parameters()):
             server_param.data -= (1 / self.alpha) * state_param
-
-    def update_server_state(self):
-        assert (len(self.received_info['client_models']) > 0)
-
-        model_delta = copy.deepcopy(self.received_info['client_models'][0])
-        for param in model_delta.parameters():
-            param.data = torch.zeros_like(param.data)
-
-        for client_model in self.received_info['client_models']:
-            for server_param, client_param, delta_param in zip(self.global_model.parameters(),
-                                                               client_model.parameters(), model_delta.parameters()):
-                delta_param.data += (client_param - server_param) / self.num_clients
-
-        for state_param, delta_param in zip(self.server_state.parameters(), model_delta.parameters()):
-            state_param.data -= self.alpha * delta_param

@@ -11,8 +11,8 @@ from ..clients.clientbase import Client
 class clientMOON(Client):
     def __init__(self, args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs):
         super().__init__(args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs)
-        self.tau = args.server_tau
-        self.mu = args.mu
+        self.tau = args.MOON_tau
+        self.mu = args.MOON_mu
         self.global_model = None
         self.old_local_model = copy.deepcopy(self.local_model)
 
@@ -23,9 +23,9 @@ class clientMOON(Client):
         # self.model.to(self.device)
         self.model.train()
 
-        max_local_epochs = self.local_epochs
+        self.max_local_epochs = self.local_epochs
         if self.train_slow:
-            max_local_epochs = np.random.randint(1, max_local_epochs // 2)
+            self.max_local_epochs = np.random.randint(1, self.max_local_epochs // 2)
 
         for epoch in range(max_local_epochs):
             for i, (x, y) in enumerate(trainloader):
@@ -56,11 +56,11 @@ class clientMOON(Client):
         self.train_time_cost['num_rounds'] += 1
 
     def set_parameters(self, model):
-        for global_param, local_param in zip(model.parameters(), self.local_model.parameters()):
-            local_param.data = global_param.data.clone()
+        for gp, lp in zip(model.parameters(), self.local_model.parameters()):
+            lp.data = gp.data.clone()
         self.global_model = copy.deepcopy(model)
 
-    def train_metrics(self):
+    def train_model(self, task_id, bptt, ottt, **kwargs):
         trainloader = self.load_train_data()
         # self.model = self.load_model('model')
         # self.model.to(self.device)

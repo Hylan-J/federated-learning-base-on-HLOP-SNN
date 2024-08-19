@@ -310,9 +310,9 @@ class Client(object):
         self.replay_ytrain[task_id] = torch.stack(self.replay_ytrain[task_id], dim=0)
 
     # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 模型训练、重放、测试操作 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    def train_metrics(self, task_id, bptt, ottt, **kwargs):
+    def train_model(self, task_id, bptt, ottt, **kwargs):
         """
-        训练
+        模型训练的主要部分
         @param task_id: 任务的id
         @param bptt: 是否是bptt实验
         @param ottt: 是否是ottt实验
@@ -380,17 +380,9 @@ class Client(object):
                         loss.backward()
                         total_loss += loss.detach()
                         if self.args.online_update:
-                            if self.fed_algorithm == 'SCAFFOLD':
-                                # self.optimizer.step(self.global_controls, self.local_controls)
-                                self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
-
-                            else:
-                                self.optimizer.step()
-                    if not self.args.online_update:
-                        if self.fed_algorithm == 'SCAFFOLD':
-                            self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
-                        else:
                             self.optimizer.step()
+                    if not self.args.online_update:
+                        self.optimizer.step()
                     train_loss += total_loss.item() * y.numel()
                     out = total_fr
                 elif bptt:
@@ -404,10 +396,7 @@ class Client(object):
                                                update_hlop=flag, fix_subspace_id_list=[0])
                     loss = self.loss(out, y)
                     loss.backward()
-                    if self.fed_algorithm == 'SCAFFOLD':
-                        self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
-                    else:
-                        self.optimizer.step()
+                    self.optimizer.step()
                     reset_net(self.local_model)
                     train_loss += loss.item() * y.numel()
                 else:
@@ -425,10 +414,7 @@ class Client(object):
                                                update_hlop=flag, fix_subspace_id_list=[0])
                     loss = self.loss(out, y)
                     loss.backward()
-                    if self.fed_algorithm == 'SCAFFOLD':
-                        self.optimizer.step(kwargs['global_controls'], kwargs['local_controls'])
-                    else:
-                        self.optimizer.step()
+                    self.optimizer.step()
                     train_loss += loss.item() * y.numel()
 
                 # measure accuracy and record loss

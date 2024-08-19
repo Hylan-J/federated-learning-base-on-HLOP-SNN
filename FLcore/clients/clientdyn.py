@@ -17,19 +17,16 @@ from ..utils.model_utils import reset_net
 class clientDyn(Client):
     def __init__(self, args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs):
         super().__init__(args, id, xtrain, ytrain, xtest, ytest, local_model, **kwargs)
-        self.alpha = args.fed_alpha
+        self.alpha = args.FedDyn_alpha
         self.global_model_vector = None
-        """old_grad = self.model_parameter_vector(copy.deepcopy(self.local_model))
-        self.old_grad = torch.zeros_like(old_grad)"""
         self.old_grad = None
 
     def train(self, task_id, bptt, ottt):
-        max_local_epochs = self.local_epochs
         if self.train_slow:
-            max_local_epochs = np.random.randint(1, max_local_epochs // 2)
+            self.local_epochs = np.random.randint(1, self.local_epochs // 2)
 
         start_time = time.time()
-        self.train_metrics(task_id, bptt, ottt)
+        self.train_model(task_id, bptt, ottt)
 
         if self.global_model_vector is not None:
             v1 = self.model_parameter_vector(self.local_model).detach()
@@ -38,17 +35,17 @@ class clientDyn(Client):
         self.train_time_cost['num_rounds'] += 1
 
     def set_parameters(self, model):
-        for global_param, local_param in zip(model.parameters(), self.local_model.parameters()):
-            local_param.data = global_param.data.clone()
+        for gp, lp in zip(model.parameters(), self.local_model.parameters()):
+            lp.data = gp.data.clone()
         self.global_model_vector = self.model_parameter_vector(model).detach().clone()
-
-    def train_metrics(self, task_id, bptt, ottt, **kwargs):
-        # 开启模型训练模式
-        self.local_model.train()
 
         old_grad = copy.deepcopy(self.local_model)
         old_grad = self.model_parameter_vector(old_grad)
         self.old_grad = torch.zeros_like(old_grad)
+
+    def train_model(self, task_id, bptt, ottt, **kwargs):
+        # 开启模型训练模式
+        self.local_model.train()
 
         # 获取对应任务的训练集和测试集
         xtrain, ytrain = self.xtrain[task_id], self.ytrain[task_id]
@@ -85,7 +82,8 @@ class clientDyn(Client):
                 batch_idx += 1
 
                 # 获取一个批次的数据和标签
-                x, y = xtrain[index].float().to(self.device), ytrain[index].to(self.device)
+                x = xtrain[index].float().to(self.device)
+                y = ytrain[index].to(self.device)
 
                 if ottt:
                     total_loss = 0.
