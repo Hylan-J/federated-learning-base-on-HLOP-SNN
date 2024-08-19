@@ -7,14 +7,10 @@ from ..modules.proj_conv import Conv2dProj, SSConv2dProj
 from FLcore.modules.proj_linear import LinearProj, SSLinear, SSLinearProj
 from ..modules.hlop_module import HLOP
 
-__all__ = [
-    'spiking_cnn',
-]
+__all__ = ['spiking_cnn']
 
 
-cfg = {
-    'A': [64, 'M', 128, 'M', 256, 'M'],
-}
+cfg = {'A': [64, 'M', 128, 'M', 256, 'M']}
 
 
 class CNN(nn.Module):
@@ -144,7 +140,7 @@ class CNN(nn.Module):
             out = weight_rate_spikes(out, self.timesteps, self.tau, self.delta_t)
         else:
             out = rate_spikes(out, self.timesteps)
-        return out
+        return inputs.view(inputs.size(0), -1), out
 
     def forward_features(self, x):
         inputs = torch.cat([x[:,_,:,:,:] for _ in range(self.timesteps)], 0)

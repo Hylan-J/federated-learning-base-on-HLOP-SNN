@@ -116,6 +116,7 @@ class spiking_MLP(nn.Module):
             with torch.no_grad():
                 self.hlop_modules[1].forward_with_update(x, fix_subspace_id_list=fix_subspace_id_list)
         x = self.sn2(x_)
+        temp = x
         if not self.share_classifier:
             assert task_id is not None
             x = self.classifiers[task_id](x)
@@ -139,7 +140,7 @@ class spiking_MLP(nn.Module):
             out = weight_rate_spikes(out, self.timesteps, self.tau, self.delta_t)
         else:
             out = rate_spikes(out, self.timesteps)
-        return out
+        return temp, out
 
     def forward_features(self, x):
         x = torch.cat([x[:, _, :, :, :] for _ in range(self.timesteps)], 0)

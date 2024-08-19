@@ -125,6 +125,7 @@ class BasicBlock(nn.Module):
                              stride=1)
         out = out_
         out = self.sn2(self.bn2(out))
+        temp = out
         if projection:
             proj_func = self.hlop_modules[1].get_proj_func(subspace_id_list=proj_id_list)
             out_ = self.conv2(out, projection=True, proj_func=proj_func)
@@ -140,7 +141,7 @@ class BasicBlock(nn.Module):
 
         out = out + identity
 
-        return out
+        return temp, out
 
     def forward_with_features(self, x):
         features = []
@@ -305,7 +306,7 @@ class SpikingResNet(nn.Module):
 
         out = self.pool(out)
         out = out.view(out.size(0), -1)
-
+        temp = out
         if not self.share_classifier:
             assert task_id is not None
             out = self.classifiers[task_id](out)
@@ -331,7 +332,7 @@ class SpikingResNet(nn.Module):
         else:
             out = rate_spikes(out, self.timesteps)
 
-        return out
+        return temp, out
 
     def forward_features(self, x):
         inputs = torch.cat([x[:, _, :, :, :] for _ in range(self.timesteps)], 0)

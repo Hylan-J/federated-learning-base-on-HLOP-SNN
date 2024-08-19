@@ -95,10 +95,10 @@ class clientDyn(Client):
                         init = (t == 0)
                         if task_id == 0:
                             flag = not (self.args.baseline and (local_epoch <= self.args.hlop_start_epochs))
-                            out_fr = self.local_model(x, task_id, projection=False, update_hlop=flag, init=init)
+                            out_fr_, out_fr = self.local_model(x, task_id, projection=False, update_hlop=flag, init=init)
                         else:
                             flag = not (self.args.baseline or (local_epoch <= self.args.hlop_start_epochs))
-                            out_fr = self.local_model(x, task_id, projection=not self.args.baseline, proj_id_list=[0],
+                            out_fr_, out_fr = self.local_model(x, task_id, projection=not self.args.baseline, proj_id_list=[0],
                                                       update_hlop=flag, fix_subspace_id_list=[0], init=init)
                         if t == 0:
                             total_fr = out_fr.clone().detach()
@@ -117,10 +117,10 @@ class clientDyn(Client):
                     self.optimizer.zero_grad()
                     if task_id == 0:
                         flag = not (self.args.baseline and (local_epoch <= self.args.hlop_start_epochs))
-                        out = self.local_model(x, task_id, projection=False, update_hlop=flag)
+                        out_, out = self.local_model(x, task_id, projection=False, update_hlop=flag)
                     else:
                         flag = not (self.args.baseline or (local_epoch <= self.args.hlop_start_epochs))
-                        out = self.local_model(x, task_id, projection=not self.args.baseline, proj_id_list=[0],
+                        out_, out = self.local_model(x, task_id, projection=not self.args.baseline, proj_id_list=[0],
                                                update_hlop=flag, fix_subspace_id_list=[0])
                     loss = self.loss(out, y)
                     loss.backward()
@@ -134,11 +134,11 @@ class clientDyn(Client):
 
                     if task_id == 0:
                         flag = not (self.args.baseline and (local_epoch <= self.args.hlop_start_epochs))
-                        out = self.local_model(x, task_id, projection=False, update_hlop=flag)
+                        out_, out = self.local_model(x, task_id, projection=False, update_hlop=flag)
 
                     else:
                         flag = not (self.args.baseline or (local_epoch <= self.args.hlop_start_epochs))
-                        out = self.local_model(x, task_id, projection=not self.args.baseline, proj_id_list=[0],
+                        out_, out = self.local_model(x, task_id, projection=not self.args.baseline, proj_id_list=[0],
                                                update_hlop=flag, fix_subspace_id_list=[0])
                     loss = self.loss(out, y)
                     loss.backward()

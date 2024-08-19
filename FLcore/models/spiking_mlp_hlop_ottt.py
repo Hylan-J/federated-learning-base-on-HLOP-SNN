@@ -6,9 +6,7 @@ from ..modules.proj_conv import Conv2dProj
 from ..modules.proj_linear import LinearProj, SSLinear, SSLinearProj, FALinear, FALinearProj
 from ..modules.hlop_module import HLOP
 
-__all__ = [
-    'spiking_MLP_ottt'
-]
+__all__ = ['spiking_MLP_ottt']
 
 
 class WrapedSNNOp(nn.Module):
@@ -138,6 +136,7 @@ class spiking_MLP(nn.Module):
             x = self.sn2(x_, output_type='spike_rate', **kwargs)
         else:
             x = self.sn2(x_, **kwargs)
+        temp = x
         if not self.share_classifier:
             assert task_id is not None
             x = self.classifiers[task_id](x, require_wrap=require_wrap)
@@ -154,7 +153,7 @@ class spiking_MLP(nn.Module):
             x = x_
 
         out = x
-        return out
+        return temp, out
 
     def add_classifier(self, num_classes):
         self.classifier_num += 1

@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torchvision
 
+from FLcore.servers.servermoon import MOON
 from FLcore.servers.serveravg import FedAvg
 from FLcore.servers.serverdyn import FedDyn
 from FLcore.servers.serverprox import FedProx
@@ -45,6 +46,8 @@ def run(args):
             server = FedProx(args, xtrain, ytrain, xtest, ytest, taskcla, model, i)
         elif args.fed_algorithm == 'FedDyn':
             server = FedDyn(args, xtrain, ytrain, xtest, ytest, taskcla, model, i)
+        elif args.fed_algorithm == 'MOON':
+            server = MOON(args, xtrain, ytrain, xtest, ytest, taskcla, model, i)
 
         server.train(args.experiment_name, True, True)
 

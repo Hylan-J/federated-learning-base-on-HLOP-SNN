@@ -521,7 +521,7 @@ class Client(object):
                 label = self.ytest[task_id][index].to(self.device)
 
                 if bptt:
-                    out = self.local_model(input, task_id, projection=False, update_hlop=False)
+                    out_, out = self.local_model(input, task_id, projection=False, update_hlop=False)
                     loss = self.loss(out, label)
                     reset_net(self.local_model)
                 elif ottt:
@@ -534,12 +534,12 @@ class Client(object):
                             out_fr = self.local_model(input, task_id, projection=False, update_hlop=False)
                             total_fr += out_fr.clone().detach()
                         loss += self.loss(out_fr, label).detach() / self.timesteps
-                    out = total_fr
+                    out_, out = total_fr
                 else:
                     # repeat for time steps
                     input = input.unsqueeze(1)
                     input = input.repeat(1, self.timesteps, 1, 1, 1)
-                    out = self.local_model(input, task_id, projection=False, update_hlop=False)
+                    out_, out = self.local_model(input, task_id, projection=False, update_hlop=False)
                     loss = self.loss(out, label)
 
                 test_num += label.numel()

@@ -7,6 +7,12 @@ This is the PyTorch implementation of the federated continual learning algorithm
 - NVIDIA GPU + [CUDA](https://developer.nvidia.com/cuda-downloads)
 - Python packages: `pip install numpy opencv-python`
 
+## Implemented Federated Learning Algorithm
+- [FedAvg](https://arxiv.org/abs/1602.05629)
+- [FedProx](https://arxiv.org/abs/1812.06127)
+- [FedDyn](https://arxiv.org/abs/2111.04263)
+- [SCAFFOLD](https://arxiv.org/abs/1910.06378)
+- [MOON](https://arxiv.org/abs/2103.16257)
 
 ## Training
 Run as following examples:
