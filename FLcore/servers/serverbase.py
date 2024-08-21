@@ -24,6 +24,7 @@ class Server(object):
     def __init__(self, args, xtrain, ytrain, xtest, ytest, taskcla, model, times):
         self.learning_rate = None
         self.experiment_name = args.experiment_name
+        self.HLOP_SNN = args.HLOP_SNN
         torch.manual_seed(0)
         self.args = args
         # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 训练设备、数据集 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>

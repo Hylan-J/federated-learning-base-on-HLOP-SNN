@@ -63,7 +63,7 @@ class FedAvg(Server):
                 self.send_models()
                 # ③选中的客户端进行训练
                 for client in self.selected_clients:
-                    client.train(task_id, True)
+                    client.train(task_id, self.HLOP_SNN)
                 # ④服务器接收训练后的客户端模型
                 self.receive_models()
                 # ⑤服务器聚合全局模型
@@ -75,7 +75,7 @@ class FedAvg(Server):
                 if global_round % self.eval_gap == 0:
                     print(f"\n-------------Round number: {global_round}-------------")
                     print("\nEvaluate global model")
-                    test_loss, test_acc = self.evaluate(task_id, True)
+                    test_loss, test_acc = self.evaluate(task_id, self.HLOP_SNN)
                     writer.add_scalar('test_loss', test_loss, global_round)
                     writer.add_scalar('test_acc', test_acc, global_round)
                 """if self.auto_break and self.check_done(acc_lss=[self.rs_test_acc], top_cnt=self.top_cnt):
@@ -83,7 +83,7 @@ class FedAvg(Server):
 
             jj = 0
             for ii in np.array(task_learned)[0:task_count + 1]:
-                _, acc_matrix[task_count, jj] = self.evaluate(ii, True)
+                _, acc_matrix[task_count, jj] = self.evaluate(ii, self.HLOP_SNN)
                 jj += 1
             print('Accuracies =')
             for i_a in range(task_count + 1):
@@ -107,14 +107,14 @@ class FedAvg(Server):
                     self.send_models()
 
                     for client in self.clients:
-                        client.replay(task_learned, True)
+                        client.replay(task_learned, self.HLOP_SNN)
                     self.receive_models()
                     self.aggregate_parameters()
 
                 # 保存准确率
                 jj = 0
                 for ii in np.array(task_learned)[0:task_count + 1]:
-                    _, acc_matrix[task_count, jj] = self.evaluate(ii, True)
+                    _, acc_matrix[task_count, jj] = self.evaluate(ii, self.HLOP_SNN)
                     jj += 1
                 print('Accuracies =')
                 for i_a in range(task_count + 1):
@@ -128,7 +128,7 @@ class FedAvg(Server):
                 self.set_new_clients(clientAVG, self.xtrain, self.ytrain, self.xtest, self.ytest)
                 print(f"\n-------------Fine tuning round-------------")
                 print("\nEvaluate new clients")
-                self.evaluate(task_id, True)
+                self.evaluate(task_id, self.HLOP_SNN)
 
             task_count += 1
 

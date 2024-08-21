@@ -172,7 +172,11 @@ class clientSCAFFOLD(Client):
                         if not self.args.online_update:
                             self.optimizer.step()
                         for lp, gc, lc in zip(self.local_model.parameters(), self.global_controls, self.local_controls):
-                            lp.data -= self.learning_rate * (gc.data.clone() - lc.data.clone())
+                            if lp.grad is None:
+                                lp.data = lp.data - self.learning_rate * (gc.data.clone() - lc.data.clone())
+                            else:
+                                lp.data = lp.data - self.learning_rate * (
+                                            lp.grad.data + gc.data.clone() - lc.data.clone())
                         train_loss += total_loss.item() * target.numel()
                         out = total_fr
                     elif bptt:
@@ -189,8 +193,11 @@ class clientSCAFFOLD(Client):
                         self.optimizer.step()
 
                         for lp, gc, lc in zip(self.local_model.parameters(), self.global_controls, self.local_controls):
-                            lp.data -= self.learning_rate * (gc.data.clone() - lc.data.clone())
-
+                            if lp.grad is None:
+                                lp.data = lp.data - self.learning_rate * (gc.data.clone() - lc.data.clone())
+                            else:
+                                lp.data = lp.data - self.learning_rate * (
+                                            lp.grad.data + gc.data.clone() - lc.data.clone())
                         reset_net(self.local_model)
                         train_loss += loss.item() * target.numel()
                     else:
@@ -211,7 +218,10 @@ class clientSCAFFOLD(Client):
                         self.optimizer.step()
 
                         for lp, gc, lc in zip(self.local_model.parameters(), self.global_controls, self.local_controls):
-                            lp.data -= self.learning_rate * (gc.data.clone() - lc.data.clone())
+                            if lp.grad is None:
+                                lp.data = lp.data - self.learning_rate * (gc.data.clone() - lc.data.clone())
+                            else:
+                                lp.data = lp.data - self.learning_rate * (lp.grad.data + gc.data.clone() - lc.data.clone())
 
                         train_loss += loss.item() * target.numel()
                 else:
@@ -227,7 +237,10 @@ class clientSCAFFOLD(Client):
                     self.optimizer.step()
 
                     for lp, gc, lc in zip(self.local_model.parameters(), self.global_controls, self.local_controls):
-                        lp.data -= self.learning_rate * (gc.data.clone() - lc.data.clone())
+                        if lp.grad is None:
+                            lp.data = lp.data - self.learning_rate * (gc.data.clone() - lc.data.clone())
+                        else:
+                            lp.data = lp.data - self.learning_rate * (lp.grad.data + gc.data.clone() - lc.data.clone())
 
                     train_loss += loss.item() * target.numel()
 
@@ -324,7 +337,10 @@ class clientSCAFFOLD(Client):
                     self.optimizer.step()
 
                     for lp, gc, lc in zip(self.local_model.parameters(), self.global_controls, self.local_controls):
-                        lp.data -= self.learning_rate * (gc.data.clone() - lc.data.clone())
+                        if lp.grad is None:
+                            lp.data = lp.data - self.learning_rate * (gc.data.clone() - lc.data.clone())
+                        else:
+                            lp.data = lp.data - self.learning_rate * (lp.grad.data + gc.data.clone() - lc.data.clone())
 
                     train_loss += loss.item() * target.numel()
 

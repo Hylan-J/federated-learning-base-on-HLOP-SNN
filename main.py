@@ -115,18 +115,21 @@ if __name__ == "__main__":
     parser.add_argument('-nnc', "--num_new_clients", type=int, default=0)
     parser.add_argument('-ften', "--fine_tuning_epoch_new", type=int, default=0)
 
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 学习率相关参数 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 学习率相关参数 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     parser.add_argument("--server_learning_rate", type=float, default=1.0, help="服务器学习率")
     parser.add_argument("--client_learning_rate", type=float, default=0.005, help="客户端学习率")
     parser.add_argument("--learning_rate_decay", type=bool, default=False)
     parser.add_argument("--learning_rate_decay_gamma", type=float, default=0.99)
+
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 联邦算法相关参数 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
     # FedDyn 相关参数
-    parser.add_argument("--FedDyn_alpha", type=float, default=1.0)
+    parser.add_argument("--FedDyn_alpha", type=float, default=1.0, help="FedDyn算法中的α参数")
     # FedProx 相关参数
-    parser.add_argument("--FedProx_mu", type=float, default=0.1)
+    parser.add_argument("--FedProx_mu", type=float, default=0.1, help="FedProx算法中的μ参数")
     # MOON 相关参数
-    parser.add_argument("--MOON_tau", type=float, default=1.0)
-    parser.add_argument("--MOON_mu", type=float, default=1.0)
+    parser.add_argument("--MOON_tau", type=float, default=1.0, help="MOON算法中的τ参数")
+    parser.add_argument("--MOON_mu", type=float, default=1.0, help="MOON算法中的μ参数")
+
     # 实际参数？
     parser.add_argument('-cdr', "--client_drop_rate", type=float, default=0.0, help="参与训练但中途退出的客户端比例")
     parser.add_argument('-tsr', "--train_slow_rate", type=float, default=0.0, help="本地训练时，速度慢的客户端比例")
@@ -150,6 +153,8 @@ if __name__ == "__main__":
     parser.add_argument("--replay_epochs", type=int, default=1, help="本地回放轮次")
     parser.add_argument("--dataset_path", type=str, default='./dataset', help="数据集的根路径")
     parser.add_argument("--root_path", type=str, default='./logs', help="文件保存文件夹的根路径")
+    parser.add_argument("--HLOP_SNN", type=bool, default=True, help="是否使用添加了HLOP的SNN")
+
     # 解析命令行参数
     args = parser.parse_args()
 
