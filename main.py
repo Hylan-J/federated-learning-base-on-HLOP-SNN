@@ -49,7 +49,7 @@ def run(args):
         elif args.fed_algorithm == 'MOON':
             server = MOON(args, xtrain, ytrain, xtest, ytest, taskcla, model, i)
 
-        server.train(args.experiment_name, True, True)
+        server.execute(args.experiment_name, True, True)
 
         time_list.append(time.time() - start)
 
@@ -141,17 +141,21 @@ if __name__ == "__main__":
     parser.add_argument("--device_id", type=str, default="0", help="实验设备的id")
     parser.add_argument("--num_clients", type=int, default=3, help="客户端数量")
     parser.add_argument("--batch_size", type=int, default=64, help="训练数据批处理大小")
-    parser.add_argument("--replay_batch_size", default=64, type=int, help="回放数据批处理大小")
-    parser.add_argument("--global_rounds", type=int, default=10, help="全局通信轮次")
-    parser.add_argument("--replay_global_rounds", type=int, default=10, help="全局重放通信轮次")
+    parser.add_argument("--replay_batch_size", type=int, default=64, help="回放数据批处理大小")
+
+    parser.add_argument("--global_rounds", type=int, default=1, help="全局通信轮次")
+    parser.add_argument("--replay_global_rounds", type=int, default=1, help="全局重放通信轮次")
+
     parser.add_argument("--local_epochs", type=int, default=1, help="本地训练轮次")
-    parser.add_argument("--replay_epochs", type=int, default=20, help="本地回放轮次")
+    parser.add_argument("--replay_epochs", type=int, default=1, help="本地回放轮次")
     parser.add_argument("--dataset_path", type=str, default='./dataset', help="数据集的根路径")
     parser.add_argument("--root_path", type=str, default='./logs', help="文件保存文件夹的根路径")
     # 解析命令行参数
     args = parser.parse_args()
 
-    args.root_path = os.path.join('logs', args.experiment_name + time.strftime(" %Y-%m-%d %H：%M：%S"))
+    args.root_path = os.path.join('logs',
+                                  args.experiment_name,
+                                  args.fed_algorithm + time.strftime(" %Y-%m-%d %H：%M：%S"))
     os.environ["CUDA_VISIBLE_DEVICES"] = args.device_id
 
     if args.device == "cuda" and not torch.cuda.is_available():

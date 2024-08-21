@@ -8,11 +8,25 @@ This is the PyTorch implementation of the federated continual learning algorithm
 - Python packages: `pip install numpy opencv-python`
 
 ## Implemented Federated Learning Algorithm
-- [FedAvg](https://arxiv.org/abs/1602.05629)
-- [FedProx](https://arxiv.org/abs/1812.06127)
-- [FedDyn](https://arxiv.org/abs/2111.04263)
-- [SCAFFOLD](https://arxiv.org/abs/1910.06378)
-- [MOON](https://arxiv.org/abs/2103.16257)
+- ### FedAvg
+《Communication-Efficient Learning of Deep Networks from Decentralized Data》
+[[arxiv](https://arxiv.org/abs/1602.05629)]
+
+- ### FedProx
+《Federated Optimization in Heterogeneous Networks》
+[[arxiv](https://arxiv.org/abs/1812.06127)]
+
+- ### FedDyn
+《Federated Learning Based on Dynamic Regularization》
+[[arxiv](https://arxiv.org/abs/2111.04263)]
+
+- ### SCAFFOLD
+《SCAFFOLD: Stochastic Controlled Averaging for Federated Learning》
+[[arxiv](https://arxiv.org/abs/1910.06378)]
+
+- ### MOON
+《Model-Contrastive Federated Learning》
+[[arxiv](https://arxiv.org/abs/2103.16257)]
 
 ## Training
 Run as following examples:

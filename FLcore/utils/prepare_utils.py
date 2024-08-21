@@ -89,7 +89,7 @@ def prepare_dataset(experiment_name: str, dataset_path: str, seed: int):
 
 def prepare_model(experiment_name: str, args, ncla):
     model = None
-    if experiment_name.startswith('pmnist'):  # pmnist/pmnist_bptt/pmnist_ottt 实验
+    if experiment_name == 'pmnist':  # pmnist 实验
         from ..models import spiking_MLP
         snn_setting = {}
         snn_setting['timesteps'] = args.timesteps
@@ -109,6 +109,17 @@ def prepare_model(experiment_name: str, args, ncla):
                             hlop_spiking=args.hlop_spiking,
                             hlop_spiking_scale=args.hlop_spiking_scale,
                             hlop_spiking_timesteps=args.hlop_spiking_timesteps)
+    elif experiment_name == 'pmnist_bptt':  # pmnist_bptt 实验
+        from ..models import spiking_MLP_bptt
+        model = spiking_MLP_bptt(num_classes=ncla, n_hidden=800, ss=args.sign_symmetric,
+                         fa=args.feedback_alignment, timesteps=args.timesteps,
+                         hlop_spiking=args.hlop_spiking, hlop_spiking_scale=args.hlop_spiking_scale,
+                         hlop_spiking_timesteps=args.hlop_spiking_timesteps)
+    elif experiment_name == 'pmnist_ottt':  # pmnist_ottt 实验
+        from ..models import spiking_MLP_ottt
+        model = spiking_MLP_ottt(num_classes=ncla, n_hidden=800, ss=args.sign_symmetric, fa=args.feedback_alignment,
+                         timesteps=args.timesteps, hlop_spiking=args.hlop_spiking,
+                         hlop_spiking_scale=args.hlop_spiking_scale, hlop_spiking_timesteps=args.hlop_spiking_timesteps)
     elif experiment_name == 'cifar':  # cifar 实验
         from ..models import spiking_cnn
         snn_setting = {}

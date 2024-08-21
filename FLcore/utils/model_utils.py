@@ -1,3 +1,4 @@
+import torch
 from torch import nn
 
 
@@ -33,3 +34,13 @@ def reset_net(net: nn.Module):
     for m in net.modules():
         if hasattr(m, 'reset'):
             m.reset()
+
+
+def model_parameter_vector(model):
+    """
+    将给定模型model的所有参数整合成一个一维的向量
+    @param model: 给定模型
+    @return: 整合后的一维向量
+    """
+    param = [param.view(-1) for param in model.parameters()]
+    return torch.cat(param, dim=0)

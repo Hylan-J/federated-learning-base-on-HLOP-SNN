@@ -8,15 +8,22 @@ import random
 
 import numpy as np
 import torch
+from progress.bar import Bar
+from torch import nn
 
-from ..utils.dlg import DLG
+from ..meter.AverageMeter import AverageMeter
+from ..utils.eval import accuracy
+
 
 __all__ = ['Server']
+
+from ..utils.model_utils import reset_net
 
 
 class Server(object):
     def __init__(self, args, xtrain, ytrain, xtest, ytest, taskcla, model, times):
         self.learning_rate = None
+        self.experiment_name = args.experiment_name
         torch.manual_seed(0)
         self.args = args
         # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 训练设备、数据集 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -35,8 +42,11 @@ class Server(object):
         # 全局训练轮数
         # 重放轮数
         self.global_model = copy.deepcopy(model)
+        self.loss = nn.CrossEntropyLoss()
+        self.batch_size = args.batch_size
         self.global_rounds = args.global_rounds
         self.replay_global_rounds = args.replay_global_rounds
+        self.timesteps = args.timesteps
 
         # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 客户端相关参数 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         # 客户端数量
@@ -99,11 +109,10 @@ class Server(object):
     # ------------------------------------------------------------------------------------------------------------------
 
     # 生成现有的客户端
-    def set_clients(self, clientObj, xtrain, ytrain, xtest, ytest, model):
+    def set_clients(self, clientObj, xtrain, ytrain, model):
         for i, train_slow, send_slow in zip(range(self.num_clients), self.train_slow_clients, self.send_slow_clients):
             client = clientObj(args=self.args, id=i,
                                xtrain=xtrain, ytrain=ytrain,
-                               xtest=xtest, ytest=ytest,
                                local_model=copy.deepcopy(model),
                                train_slow=train_slow, send_slow=send_slow)
             self.clients.append(client)
@@ -223,67 +232,107 @@ class Server(object):
             for server_param, client_param in zip(self.global_model.parameters(), model.parameters()):
                 server_param.data += client_param.data.clone() * weight
 
-    # ------------------------------------------------------------------------------------------------------------------
-    # 训练、评估相关操作
-    # ------------------------------------------------------------------------------------------------------------------
-    def train_metrics(self, task_id, bptt, ottt):
-        if self.eval_new_clients and self.num_new_clients > 0:
-            return [0], [1], [0]
+    def evaluate(self, task_id: int, HLOP_SNN: bool):
+        # --------------------------------------------------------------------------------------------------------------
+        # 获取实验相关参数（是否是HLOP_SNN相关实验，如果是的话，是否是bptt/ottt相关设置）
+        # --------------------------------------------------------------------------------------------------------------
+        bptt = False
+        ottt = False
+        if HLOP_SNN:
+            if self.experiment_name.endswith('bptt'):
+                bptt = True
+            elif self.experiment_name.endswith('ottt'):
+                ottt = True
 
-        losses, accuracies, num_samples = [], [], []
-        for client in self.selected_clients:
-            client_train_loss, client_train_acc, client_train_num = client.train_model(task_id, bptt, ottt)
-            losses.append(client_train_loss * 1.0)
-            accuracies.append(client_train_acc)
-            num_samples.append(client_train_num)
+        # 全局模型开启评估模式
+        self.global_model.eval()
 
-        return losses, accuracies, num_samples
+        batch_time = AverageMeter()
+        data_time = AverageMeter()
+        losses = AverageMeter()
+        top1 = AverageMeter()
+        top5 = AverageMeter()
+        end = time.time()
 
-    def test_metrics(self, task_id, bptt, ottt):
-        """
-        测试
-        @param task_id:
-        @param bptt:
-        @param ottt:
-        @return:
-        """
-        """if self.eval_new_clients and self.num_new_clients > 0:
-            self.fine_tuning_new_clients()
-            return self.test_metrics_new_clients()"""
+        bar = Bar('Server Testing', max=((self.xtest[task_id].size(0) - 1) // self.batch_size + 1))
 
-        losses, accuracies, num_samples = [], [], []
-        for client in self.selected_clients:
-            test_loss, test_acc, test_num = client.test_metrics(task_id, bptt, ottt)
-            losses.append(test_loss)
-            accuracies.append(test_acc * 1.0)
-            num_samples.append(test_num)
+        test_acc = 0
+        test_loss = 0
+        test_num = 0
+        batch_idx = 0
 
-        return losses, accuracies, num_samples
+        r = np.arange(self.xtest[task_id].size(0))
+        with torch.no_grad():
+            for i in range(0, len(r), self.batch_size):
+                if i + self.batch_size <= len(r):
+                    index = r[i: i + self.batch_size]
+                else:
+                    index = r[i:]
+                batch_idx += 1
 
-    def evaluate(self, task_id: int, bptt: bool, ottt: bool, acc=None, loss=None):
-        test_losses, test_accuracies, test_num_samples = self.test_metrics(task_id, bptt, ottt)
-        # train_losses, train_accuracies, train_num_samples = self.train_metrics(task_id, bptt, ottt)
-        test_loss_avg = sum(test_losses) * 1.0 / len(test_num_samples)
-        test_acc_avg = sum(test_accuracies) * 1.0 / len(test_num_samples)
-        # train_loss_avg = sum(train_losses) * 1.0 / sum(train_num_samples)
+                data = self.xtest[task_id][index].float().to(self.device)
+                label = self.ytest[task_id][index].to(self.device)
 
-        test_acc_each = [a / n for a, n in zip(test_accuracies, test_num_samples)]
+                if HLOP_SNN:
+                    if bptt:
+                        out_, out = self.global_model(data, task_id, projection=False, update_hlop=False)
+                        loss = self.loss(out, label)
+                        reset_net(self.global_model)
+                    elif ottt:
+                        loss = 0.
+                        for t in range(self.timesteps):
+                            if t == 0:
+                                out_fr = self.global_model(data, task_id, projection=False, update_hlop=False, init=True)
+                                total_fr = out_fr.clone().detach()
+                            else:
+                                out_fr = self.global_model(data, task_id, projection=False, update_hlop=False)
+                                total_fr += out_fr.clone().detach()
+                            loss += self.loss(out_fr, label).detach() / self.timesteps
+                        out_, out = total_fr
+                    else:
+                        data = data.unsqueeze(1)
+                        data = data.repeat(1, self.timesteps, 1, 1, 1)
+                        out_, out = self.global_model(data, task_id, projection=False, update_hlop=False)
+                        loss = self.loss(out, label)
+                else:
+                    out_, out = self.global_model(data)
+                    loss = self.loss(out, label)
 
-        if acc is None:
-            self.rs_test_acc.append(test_acc_avg)
-        else:
-            acc.append(test_acc_avg)
+                test_num += label.numel()
+                test_loss += loss.item() * label.numel()
+                test_acc += (out.argmax(1) == label).float().sum().item()
 
-        """if loss is None:
-            self.rs_train_loss.append(train_loss_avg)
-        else:
-            loss.append(train_loss_avg)"""
-        print('-' * 25, '{:^5d}'.format(task_id), '-' * 25)
-        # print("Averaged Train Loss: {:.4f}".format(train_loss_avg))
-        print("Averaged Test Accuracy: {:.4f}".format(test_acc_avg))
-        print("Std Test Accuracy: {:.4f}".format(np.std(test_acc_each)))
-        print('-' * 55)
-        return test_loss_avg, test_acc_avg
+                # measure accuracy and record loss
+                prec1, prec5 = accuracy(out.data, label.data, topk=(1, 5))
+                losses.update(loss, data.size(0))
+                top1.update(prec1.item(), data.size(0))
+                top5.update(prec5.item(), data.size(0))
+
+                # measure elapsed time
+                batch_time.update(time.time() - end)
+                end = time.time()
+
+                # plot progress
+                bar.suffix = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
+                    batch=batch_idx,
+                    size=((self.xtest[task_id].size(0) - 1) // self.batch_size + 1),
+                    data=data_time.avg,
+                    bt=batch_time.avg,
+                    total=bar.elapsed_td,
+                    eta=bar.eta_td,
+                    loss=losses.avg,
+                    top1=top1.avg,
+                    top5=top5.avg,
+                )
+                bar.next()
+        bar.finish()
+
+        test_acc /= test_num
+        test_loss /= test_num
+
+        print("Test Accuracy: {:.4f}".format(test_acc))
+        print("Test Loss: {:.4f}".format(test_loss))
+        return test_loss, test_acc
 
     def check_done(self, acc_lss, top_cnt=None, div_value=None):
         for acc_ls in acc_lss:
@@ -330,7 +379,6 @@ class Server(object):
                     loss.backward()
                     opt.step()
 
-    # evaluating on new clients
     def test_metrics_new_clients(self):
         num_samples = []
         tot_correct = []

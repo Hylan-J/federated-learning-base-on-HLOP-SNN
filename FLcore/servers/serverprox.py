@@ -1,3 +1,7 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# @Description : FedProx算法的服务器类
+import copy
 import os
 import time
 
@@ -13,10 +17,10 @@ class FedProx(Server):
     def __init__(self, args, xtrain, ytrain, xtest, ytest, taskcla, model, times):
         super().__init__(args, xtrain, ytrain, xtest, ytest, taskcla, model, times)
         self.set_slow_clients()
-        self.set_clients(clientProx, self.xtrain, self.ytrain, self.xtest, self.ytest, model)
+        self.set_clients(clientProx, self.xtrain, self.ytrain, model)
         self.time_cost = []
 
-    def train(self, experiment_name: str, replay: bool, HLOP_SNN: bool):
+    def execute(self, experiment_name: str, replay: bool, HLOP_SNN: bool):
         bptt, ottt = prepare_bptt_ottt(experiment_name)
         if bptt or ottt:
             replay = False
@@ -54,19 +58,19 @@ class FedProx(Server):
                 self.send_models()
                 # ③选中的客户端进行训练
                 for client in self.selected_clients:
-                    client.train(task_id, bptt, ottt)
+                    client.train(task_id, True)
                 # ④服务器接收训练后的客户端模型
                 self.receive_models()
                 # ⑤服务器聚合全局模型
                 self.aggregate_parameters()
 
                 self.time_cost.append(time.time() - start_time)
-                print('-' * 25, 'Task', task_id, 'Time Cost', '-' * 25, self.time_cost[-1])
+                print('-' * 25, 'Task', task_id, 'Time Cost', self.time_cost[-1], '-' * 25)
                 # 当前轮次达到评估轮次
                 if global_round % self.eval_gap == 0:
                     print(f"\n-------------Round number: {global_round}-------------")
                     print("\nEvaluate global model")
-                    test_loss, test_acc = self.evaluate(task_id, bptt, ottt)
+                    test_loss, test_acc = self.evaluate(task_id, True)
                     writer.add_scalar('test_loss', test_loss, global_round)
                     writer.add_scalar('test_acc', test_acc, global_round)
                 """if self.auto_break and self.check_done(acc_lss=[self.rs_test_acc], top_cnt=self.top_cnt):
@@ -74,7 +78,7 @@ class FedProx(Server):
 
             jj = 0
             for ii in np.array(task_learned)[0:task_count + 1]:
-                _, acc_matrix[task_count, jj] = self.evaluate(ii, bptt, ottt)
+                _, acc_matrix[task_count, jj] = self.evaluate(ii, True)
                 jj += 1
             print('Accuracies =')
             for i_a in range(task_count + 1):
@@ -98,14 +102,14 @@ class FedProx(Server):
                     self.send_models()
 
                     for client in self.clients:
-                        client.replay(task_learned)
+                        client.replay(task_learned, True)
                     self.receive_models()
                     self.aggregate_parameters()
 
                 # 保存准确率
                 jj = 0
                 for ii in np.array(task_learned)[0:task_count + 1]:
-                    _, acc_matrix[task_count, jj] = self.evaluate(ii, bptt, ottt)
+                    _, acc_matrix[task_count, jj] = self.evaluate(ii, True)
                     jj += 1
                 print('Accuracies =')
                 for i_a in range(task_count + 1):
@@ -119,6 +123,22 @@ class FedProx(Server):
                 self.set_new_clients(clientProx, self.xtrain, self.ytrain, self.xtest, self.ytest)
                 print(f"\n-------------Fine tuning round-------------")
                 print("\nEvaluate new clients")
-                self.evaluate(task_id, bptt, ottt)
+                self.evaluate(task_id, True)
 
             task_count += 1
+
+    def aggregate_parameters(self):
+        """
+        根据本地模型聚合全局模型
+        @return:
+        """
+        # 断言客户端上传的模型数量不为零
+        assert (len(self.received_info['client_models']) > 0)
+        self.global_model = copy.deepcopy(self.received_info['client_models'][0])
+        # 将全局模型的参数值清空
+        for param in self.global_model.parameters():
+            param.data.zero_()
+        # 获取全局模型的参数值
+        for weight, model in zip(self.received_info['client_weights'], self.received_info['client_models']):
+            for server_param, client_param in zip(self.global_model.parameters(), model.parameters()):
+                server_param.data += client_param.data.clone() * weight
