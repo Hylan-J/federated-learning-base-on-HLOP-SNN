@@ -24,7 +24,7 @@ class SCAFFOLD(Server):
         self.set_clients(clientSCAFFOLD, self.xtrain, self.ytrain, model)
         # 全局控制变量
         self.global_controls = []
-        self.learning_rate = args.server_learning_rate
+        self.eta = args.SCAFFOLD_eta
         self.time_cost = []
 
     def send_models(self):
@@ -54,16 +54,16 @@ class SCAFFOLD(Server):
         for idx in self.received_info['client_ids']:
             delta_model, delta_control = self.clients[idx].delta_yc(task_id)
             for global_model_param, local_model_param in zip(global_model.parameters(), delta_model):
-                global_model_param.data += local_model_param.data.clone() / self.num_join_clients * self.learning_rate
+                global_model_param.data += local_model_param.data.clone() / self.num_join_clients * self.eta
             for global_control_param, local_control_param in zip(global_controls, delta_control):
                 global_control_param.data += local_control_param.data.clone() / self.num_clients
         self.global_model = global_model
         self.global_controls = global_controls
 
-    def execute(self, experiment_name: str, replay: bool, HLOP_SNN: bool):
+    def execute(self, experiment_name: str, HLOP_SNN: bool):
         bptt, ottt = prepare_bptt_ottt(experiment_name)
         if bptt or ottt:
-            replay = False
+            self.replay = False
 
         hlop_out_num, hlop_out_num_inc, hlop_out_num_inc1 = prepare_hlop_out(experiment_name)
 
@@ -86,7 +86,7 @@ class SCAFFOLD(Server):
                 self.global_controls = [torch.zeros_like(param) for param in self.global_model.parameters()]
 
             for client in self.clients:
-                if replay:
+                if self.replay:
                     client.set_replay_data(task_id, ncla)
                 client.set_optimizer(task_id, experiment_name, False)
                 client.set_learning_rate_scheduler(experiment_name, False)
@@ -133,7 +133,7 @@ class SCAFFOLD(Server):
                 self.adjust_to_HLOP_SNN_after_train_task()
 
             # 如果重放并且起码参与了一个任务
-            if replay and task_count >= 1:
+            if self.replay and task_count >= 1:
                 print('memory replay\n')
 
                 for replay_global_round in range(1, self.replay_global_rounds + 1):

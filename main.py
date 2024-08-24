@@ -24,8 +24,11 @@ logger.setLevel(logging.ERROR)
 
 warnings.simplefilter("ignore")
 
-# 设置torch的随机种子
-torch.manual_seed(0)
+_seed_ = 2024
+torch.manual_seed(_seed_)  # use torch.manual_seed() to seed the RNG for all devices (both CPU and CUDA)
+torch.cuda.manual_seed_all(_seed_)
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
 
 
 def run(args):
@@ -34,7 +37,7 @@ def run(args):
     model = model.to(args.device)
     time_list = []
     for i in range(args.prev, args.times):
-        print(f"\n============= Running time: {i}th =============")
+        # print(f"\n============= Running time: {i}th =============")
         print("Creating server and clients ...")
         start = time.time()
 
@@ -49,7 +52,7 @@ def run(args):
         elif args.fed_algorithm == 'MOON':
             server = MOON(args, xtrain, ytrain, xtest, ytest, taskcla, model, i)
 
-        server.execute(args.experiment_name, True, True)
+        server.execute(args.experiment_name, True)
 
         time_list.append(time.time() - start)
 
@@ -60,28 +63,8 @@ def run(args):
 if __name__ == "__main__":
     # 获取命令行参数解析对象
     parser = argparse.ArgumentParser()
-
-    parser.add_argument('-opt', type=str, help='use which optimizer. SGD or Adam', default='SGD')
-    parser.add_argument('-lr', default=0.01, type=float, help='learning rate')
-    parser.add_argument('-momentum', default=0.9, type=float, help='momentum for SGD')
-    parser.add_argument('-lr_scheduler', default='CosALR', type=str, help='use which schedule. StepLR or CosALR')
-    parser.add_argument('-step_size', default=100, type=float, help='step_size for StepLR')
-    parser.add_argument('-gamma', default=0.1, type=float, help='gamma for StepLR')
-    parser.add_argument('-T_max', default=200, type=int, help='T_max for CosineAnnealingLR')
-    parser.add_argument('-warmup', default=5, type=int, help='warmup epochs for learning rate')
-    parser.add_argument('-cnf', type=str)
-
     parser.add_argument('-hlop_start_epochs', default=0, type=int, help='the start epoch to update hlop')
-    parser.add_argument('-hlop_proj_type', type=str,
-                        help='choice for projection type in bottom implementation, default is input, can choose weight for acceleration of convolutional operations',
-                        default='input')
-
-    parser.add_argument('-memory_size', default=50, type=int, help='memory size for replay')
-    parser.add_argument('-replay_lr', default=0.001, type=float, help='learning rate for replay')
-    parser.add_argument('-replay_T_max', default=20, type=int, help='T_max for CosineAnnealingLR for replay')
-    parser.add_argument('-feedback_alignment', action='store_true', help='feedback alignment')
-    parser.add_argument('-sign_symmetric', action='store_true', help='use sign symmetric')
-    parser.add_argument('-baseline', action='store_true', help='baseline')
+    parser.add_argument('-hlop_proj_type', type=str, help='choice for projection type in bottom implementation, default is input, can choose weight for acceleration of convolutional operations', default='input')
 
     # SNN settings
     parser.add_argument('-timesteps', default=20, type=int)
@@ -102,8 +85,7 @@ if __name__ == "__main__":
     parser.add_argument('-go', "--goal", type=str, default="test", help="The goal for this experiment")
 
     parser.add_argument('-jr', "--join_ratio", type=float, default=1.0, help="Ratio of clients per round")
-    parser.add_argument('-rjr', "--random_join_ratio", type=bool, default=False,
-                        help="Random ratio of clients per round")
+    parser.add_argument('-rjr', "--random_join_ratio", type=bool, default=False, help="Random ratio of clients per round")
 
     parser.add_argument('-pv', "--prev", type=int, default=0, help="之前的运行次数")
     parser.add_argument('-t', "--times", type=int, default=1, help="Running times")
@@ -115,45 +97,63 @@ if __name__ == "__main__":
     parser.add_argument('-nnc', "--num_new_clients", type=int, default=0)
     parser.add_argument('-ften', "--fine_tuning_epoch_new", type=int, default=0)
 
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 学习率相关参数 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    parser.add_argument("--server_learning_rate", type=float, default=1.0, help="服务器学习率")
-    parser.add_argument("--client_learning_rate", type=float, default=0.005, help="客户端学习率")
-    parser.add_argument("--learning_rate_decay", type=bool, default=False)
-    parser.add_argument("--learning_rate_decay_gamma", type=float, default=0.99)
-
-    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 联邦算法相关参数 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    # FedDyn 相关参数
-    parser.add_argument("--FedDyn_alpha", type=float, default=1.0, help="FedDyn算法中的α参数")
-    # FedProx 相关参数
-    parser.add_argument("--FedProx_mu", type=float, default=0.1, help="FedProx算法中的μ参数")
-    # MOON 相关参数
-    parser.add_argument("--MOON_tau", type=float, default=1.0, help="MOON算法中的τ参数")
-    parser.add_argument("--MOON_mu", type=float, default=1.0, help="MOON算法中的μ参数")
-
     # 实际参数？
     parser.add_argument('-cdr', "--client_drop_rate", type=float, default=0.0, help="参与训练但中途退出的客户端比例")
     parser.add_argument('-tsr', "--train_slow_rate", type=float, default=0.0, help="本地训练时，速度慢的客户端比例")
     parser.add_argument('-ssr', "--send_slow_rate", type=float, default=0.0, help="发送全局模型时，速度慢的客户端比例")
-    parser.add_argument('-ts', "--time_select", type=bool, default=False,
-                        help="是否根据时间成本对每轮客户进行分组和选择")
+    parser.add_argument('-ts', "--time_select", type=bool, default=False, help="是否根据时间成本对每轮客户进行分组和选择")
     parser.add_argument('-tth', "--time_threthold", type=float, default=10000, help="丢弃慢客户端的阈值")
 
+    # 联邦算法相关参数 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    parser.add_argument("--FedDyn_alpha", type=float, default=1.0, help="FedDyn算法的α参数")  # FedDyn 相关参数
+    parser.add_argument("--FedProx_mu", type=float, default=0.1, help="FedProx算法的μ参数")  # FedProx 相关参数
+    parser.add_argument("--MOON_tau", type=float, default=1.0, help="MOON算法的τ参数")  # MOON 相关参数
+    parser.add_argument("--MOON_mu", type=float, default=1.0, help="MOON算法的μ参数")
+    parser.add_argument("--SCAFFOLD_eta", type=float, default=1.0, help="SCAFFOLD算法的η参数")  # SCAFFOLD 相关参数
+    # 联邦算法相关参数 <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    # 文件路径相关参数 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    parser.add_argument("--dataset_path", type=str, default='./dataset', help="数据集的根路径")
+    parser.add_argument("--root_path", type=str, default='./logs', help="文件保存文件夹的根路径")
+    # 文件路径相关参数 <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    # 训练及重放相关参数 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    parser.add_argument("--global_rounds", type=int, default=1, help="全局通信轮次")
+    parser.add_argument("--local_epochs", type=int, default=1, help="本地训练轮次")
+    parser.add_argument("--batch_size", type=int, default=64, help="训练数据批处理大小")
+    parser.add_argument("--replay_global_rounds", type=int, default=1, help="重放全局通信轮次")
+    parser.add_argument("--replay_local_epochs", type=int, default=1, help="重放本地回放轮次")
+    parser.add_argument("--replay_batch_size", type=int, default=64, help="重放数据批处理大小")
+
+    parser.add_argument('--opt', type=str, help='use which optimizer. SGD or Adam', default='SGD')
+    parser.add_argument('--momentum', default=0.9, type=float, help="SGD的冲量")
+    parser.add_argument('--learning_rate', default=0.01, type=float, help="客户端学习率")
+    parser.add_argument('--continual_learning_rate', default=0.01, type=float, help="持续任务的学习率")
+    parser.add_argument('--replay_learning_rate', default=0.001, type=float, help="客户端重放学习率")
+
+    parser.add_argument('--lr_scheduler', default='CosALR', type=str, help='use which schedule. StepLR or CosALR')
+    parser.add_argument('--warmup', default=5, type=int, help='warmup epochs for learning rate')
+    parser.add_argument('--step_size', default=100, type=float, help='step_size for StepLR')
+    parser.add_argument('--gamma', default=0.1, type=float, help='gamma for StepLR')
+    parser.add_argument('--T_max', default=200, type=int, help='T_max for CosineAnnealingLR')
+    parser.add_argument('--replay_T_max', default=20, type=int, help='T_max for CosineAnnealingLR for replay')
+
+    # ---------------------------------------------------------------------------------------------------------------- #
+
+    parser.add_argument('--memory_size', default=50, type=int, help='memory size for replay')
+    parser.add_argument('--feedback_alignment', action='store_true', help='feedback alignment')
+    parser.add_argument('--sign_symmetric', action='store_true', help='use sign symmetric')
+    parser.add_argument('--baseline', action='store_true', help='baseline')
+    # 训练及重放相关参数 <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
     parser.add_argument("--experiment_name", type=str, default="pmnist", help="实验名称")
-    parser.add_argument('--fed_algorithm', type=str, default='FedAvg', help='联邦算法')
+    parser.add_argument('--fed_algorithm', type=str, default='FedAvg', help='使用的联邦算法')
+
     parser.add_argument("--device", type=str, default="cuda", choices=["cpu", "cuda"], help="实验设备")
     parser.add_argument("--device_id", type=str, default="0", help="实验设备的id")
     parser.add_argument("--num_clients", type=int, default=3, help="客户端数量")
-    parser.add_argument("--batch_size", type=int, default=64, help="训练数据批处理大小")
-    parser.add_argument("--replay_batch_size", type=int, default=64, help="回放数据批处理大小")
-
-    parser.add_argument("--global_rounds", type=int, default=1, help="全局通信轮次")
-    parser.add_argument("--replay_global_rounds", type=int, default=1, help="全局重放通信轮次")
-
-    parser.add_argument("--local_epochs", type=int, default=1, help="本地训练轮次")
-    parser.add_argument("--replay_epochs", type=int, default=1, help="本地回放轮次")
-    parser.add_argument("--dataset_path", type=str, default='./dataset', help="数据集的根路径")
-    parser.add_argument("--root_path", type=str, default='./logs', help="文件保存文件夹的根路径")
     parser.add_argument("--HLOP_SNN", type=bool, default=True, help="是否使用添加了HLOP的SNN")
+    parser.add_argument("--replay", type=bool, default=True, help="是否进行重放")
 
     # 解析命令行参数
     args = parser.parse_args()

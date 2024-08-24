@@ -291,7 +291,7 @@ class clientMOON(Client):
             train_loss = 0
             batch_idx = 0
 
-            for epoch in range(1, self.replay_epochs + 1):
+            for epoch in range(1, self.replay_local_epochs + 1):
                 for i in range(0, task_data_num, self.replay_batch_size):
                     if i + self.replay_batch_size <= task_data_num:
                         index = r[i: i + self.replay_batch_size]
@@ -341,7 +341,7 @@ class clientMOON(Client):
 
                     bar.suffix = '({batch}/{size}) Data: {data:.3f}s | Batch: {bt:.3f}s | Total: {total:} | ETA: {eta:} | Loss: {loss:.4f} | top1: {top1: .4f} | top5: {top5: .4f}'.format(
                         batch=batch_idx,
-                        size=((num_trainset - 1) // self.replay_batch_size + 1) * self.replay_epochs,
+                        size=((num_trainset - 1) // self.replay_batch_size + 1) * self.replay_local_epochs,
                         data=data_time.avg,
                         bt=batch_time.avg,
                         total=bar.elapsed_td,

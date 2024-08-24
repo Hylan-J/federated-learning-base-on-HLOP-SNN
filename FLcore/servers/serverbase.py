@@ -22,10 +22,8 @@ from ..utils.model_utils import reset_net
 
 class Server(object):
     def __init__(self, args, xtrain, ytrain, xtest, ytest, taskcla, model, times):
-        self.learning_rate = None
-        self.experiment_name = args.experiment_name
-        self.HLOP_SNN = args.HLOP_SNN
-        torch.manual_seed(0)
+        self.learning_rate = args.learning_rate
+
         self.args = args
         # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 训练设备、数据集 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         # 设备
@@ -33,8 +31,10 @@ class Server(object):
         # 数据集描述
         # 全局可执行任务
         self.device = args.device
-        self.xtrain, self.ytrain = xtrain, ytrain
-        self.xtest, self.ytest = xtest, ytest
+        self.xtrain = xtrain
+        self.ytrain = ytrain
+        self.xtest = xtest
+        self.ytest = ytest
         self.taskcla = taskcla
         self.global_tasks = []
 
@@ -104,6 +104,10 @@ class Server(object):
         self.root_path = os.path.join(args.root_path, 'Server')
         self.logs_path = os.path.join(self.root_path, 'logs')
         self.models_path = os.path.join(self.root_path, 'models')
+
+        self.experiment_name = args.experiment_name
+        self.HLOP_SNN = args.HLOP_SNN
+        self.replay = args.replay
 
     # ------------------------------------------------------------------------------------------------------------------
     # 设置相关客户端操作

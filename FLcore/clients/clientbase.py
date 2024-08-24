@@ -5,7 +5,6 @@ import os
 import copy
 import math
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -21,12 +20,10 @@ class Client(object):
         @param test_samples:
         @param kwargs:
         """
-        # 设置CPU生成随机数的种子 ，方便下次复现实验结果。
-        torch.manual_seed(0)
         self.args = args
         self.id = id  # id标识
-        self.fed_algorithm = args.fed_algorithm  # 联邦算法
         self.experiment_name = args.experiment_name
+        self.fed_algorithm = args.fed_algorithm  # 联邦算法
         # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 训练设备、数据集 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         # 设备
         # 训练集
@@ -34,9 +31,11 @@ class Client(object):
         # 重放数据集
         # 本地可执行任务
         self.device = args.device
-        self.xtrain, self.ytrain = xtrain, ytrain
-        self.train_samples = xtrain[0].size(0)
-        self.replay_xtrain, self.replay_ytrain = {}, {}
+        self.xtrain = xtrain
+        self.ytrain = ytrain
+        self.train_samples = len(xtrain[0])
+        self.replay_xtrain = {}
+        self.replay_ytrain = {}
         self.local_tasks = list(self.xtrain.keys())
 
         # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< 模型训练相关参数 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -46,20 +45,31 @@ class Client(object):
         # 学习率
         # 学习率调节器
         self.local_model = copy.deepcopy(local_model)
-        self.loss = nn.CrossEntropyLoss()
-        self.optimizer = None
-        self.learning_rate = args.client_learning_rate
-        self.learning_rate_decay = args.learning_rate_decay
-        self.learning_rate_scheduler = None
 
+        self.loss = nn.CrossEntropyLoss()
         # 本地轮次
         # 重放轮次
         # 批处理大小
         # 重放批处理大小
         self.local_epochs = args.local_epochs
-        self.replay_epochs = args.replay_epochs
+        self.replay_local_epochs = args.replay_local_epochs
         self.batch_size = args.batch_size
         self.replay_batch_size = args.replay_batch_size
+
+        self.optimizer = None
+        self.momentum = args.momentum
+        self.learning_rate = args.learning_rate
+        self.continual_learning_rate = args.continual_learning_rate
+        self.replay_learning_rate = args.replay_learning_rate
+        self.current_learning_rate = self.learning_rate
+
+        self.learning_rate_scheduler = None
+        self.warmup = args.warmup
+        self.StepLR_step_size = args.step_size
+        self.StepLR_gamma = args.gamma
+        self.CosineAnnealingLR_T_max = args.T_max
+        self.CosineAnnealingLR_replay_T_max = args.replay_T_max
+
         # 记忆的大小
         # SNN的时间步
         self.memory_size = args.memory_size
@@ -111,77 +121,100 @@ class Client(object):
                 else:
                     params.append(p)
         # 获取本地模型参数 <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
         if experiment_name.startswith('pmnist'):  # pmnist/pmnist_bptt/pmnist_ottt 实验
             # 如果实验的名称是pmnist，设置replay=True才能真正重放
             if replay and experiment_name == 'pmnist':
                 if self.args.opt == 'SGD':
-                    self.optimizer = torch.optim.SGD(params, lr=self.args.replay_lr)
+                    self.optimizer = torch.optim.SGD(params, lr=self.replay_learning_rate)
+                    self.current_learning_rate = self.replay_learning_rate
                 elif self.args.opt == 'Adam':
-                    self.optimizer = torch.optim.Adam(params, lr=self.args.replay_lr)
+                    self.optimizer = torch.optim.Adam(params, lr=self.replay_learning_rate)
+                    self.current_learning_rate = self.replay_learning_rate
                 else:
                     raise NotImplementedError(self.args.opt)
             else:
                 if self.args.opt == 'SGD':
-                    self.optimizer = torch.optim.SGD(params, lr=self.args.lr)
+                    self.optimizer = torch.optim.SGD(params, lr=self.learning_rate)
+                    self.current_learning_rate = self.learning_rate
                 elif self.args.opt == 'Adam':
-                    self.optimizer = torch.optim.Adam(params, lr=self.args.lr)
+                    self.optimizer = torch.optim.Adam(params, lr=self.learning_rate)
+                    self.current_learning_rate = self.learning_rate
                 else:
                     raise NotImplementedError(self.args.opt)
         elif experiment_name == 'cifar':  # cifar 实验
-            if replay:
+            if replay:  # 如果重放
                 if self.args.opt == 'SGD':
-                    self.optimizer = torch.optim.SGD(params, lr=self.args.replay_lr, momentum=self.args.momentum)
+                    self.optimizer = torch.optim.SGD(params, lr=self.replay_learning_rate, momentum=self.momentum)
+                    self.current_learning_rate = self.replay_learning_rate
                 elif self.args.opt == 'Adam':
-                    self.optimizer = torch.optim.Adam(params, lr=self.args.replay_lr)
+                    self.optimizer = torch.optim.Adam(params, lr=self.replay_learning_rate)
+                    self.current_learning_rate = self.replay_learning_rate
                 else:
                     raise NotImplementedError(self.args.opt)
-            else:
+            else:  # 如果不重放
                 if self.args.opt == 'SGD':
-                    self.optimizer = torch.optim.SGD(params, lr=self.args.lr, momentum=self.args.momentum)
+                    self.optimizer = torch.optim.SGD(params, lr=self.learning_rate, momentum=self.momentum)
+                    self.current_learning_rate = self.learning_rate
                 elif self.args.opt == 'Adam':
-                    self.optimizer = torch.optim.Adam(params, lr=self.args.lr)
+                    self.optimizer = torch.optim.Adam(params, lr=self.learning_rate)
+                    self.current_learning_rate = self.learning_rate
                 else:
                     raise NotImplementedError(self.args.opt)
         elif experiment_name == 'miniimagenet':  # miniimagenet 实验
             if replay:
                 if self.args.opt == 'SGD':
-                    self.optimizer = torch.optim.SGD(params, lr=self.args.replay_lr, momentum=self.args.momentum)
+                    self.optimizer = torch.optim.SGD(params, lr=self.replay_learning_rate, momentum=self.momentum)
+                    self.current_learning_rate = self.replay_learning_rate
                 elif self.args.opt == 'Adam':
-                    self.optimizer = torch.optim.Adam(params, lr=self.args.replay_lr)
+                    self.optimizer = torch.optim.Adam(params, lr=self.replay_learning_rate)
+                    self.current_learning_rate = self.replay_learning_rate
                 else:
                     raise NotImplementedError(self.args.opt)
             else:
                 if self.args.opt == 'SGD':
                     if task_id == 0:
-                        self.optimizer = torch.optim.SGD(params, lr=self.args.lr, momentum=self.args.momentum)
+                        self.optimizer = torch.optim.SGD(params, lr=self.learning_rate, momentum=self.momentum)
+                        self.current_learning_rate = self.learning_rate
                     else:
-                        self.optimizer = torch.optim.SGD(params, lr=self.args.lr_continual, momentum=self.args.momentum)
+                        self.optimizer = torch.optim.SGD(params, lr=self.continual_learning_rate,
+                                                         momentum=self.momentum)
+                        self.current_learning_rate = self.continual_learning_rate
                 elif self.args.opt == 'Adam':
                     if task_id == 0:
-                        self.optimizer = torch.optim.Adam(params, lr=self.args.lr)
+                        self.optimizer = torch.optim.Adam(params, lr=self.learning_rate)
+                        self.current_learning_rate = self.learning_rate
                     else:
-                        self.optimizer = torch.optim.Adam(params, lr=self.args.lr_continual)
+                        self.optimizer = torch.optim.Adam(params, lr=self.continual_learning_rate)
+                        self.current_learning_rate = self.continual_learning_rate
                 else:
                     raise NotImplementedError(self.args.opt)
         elif experiment_name.startswith('fivedataset'):  # fivedataset/fivedataset_domain 实验
-            if replay:
+            if replay:  # 如果重放
                 if self.args.opt == 'SGD':
-                    self.optimizer = torch.optim.SGD(params, lr=self.args.replay_lr, momentum=self.args.momentum)
+                    self.optimizer = torch.optim.SGD(params, lr=self.replay_learning_rate, momentum=self.momentum)
+                    self.current_learning_rate = self.replay_learning_rate
                 elif self.args.opt == 'Adam':
-                    self.optimizer = torch.optim.Adam(params, lr=self.args.replay_lr)
+                    self.optimizer = torch.optim.Adam(params, lr=self.replay_learning_rate)
+                    self.current_learning_rate = self.replay_learning_rate
                 else:
                     raise NotImplementedError(self.args.opt)
-            else:
+            else:  # 如果不重放
                 if self.args.opt == 'SGD':
                     if task_id == 0:
-                        self.optimizer = torch.optim.SGD(params, lr=self.args.lr, momentum=self.args.momentum)
+                        self.optimizer = torch.optim.SGD(params, lr=self.learning_rate, momentum=self.momentum)
+                        self.current_learning_rate = self.learning_rate
                     else:
-                        self.optimizer = torch.optim.SGD(params, lr=self.args.lr_continual, momentum=self.args.momentum)
+                        self.optimizer = torch.optim.SGD(params, lr=self.continual_learning_rate,
+                                                         momentum=self.momentum)
+                        self.current_learning_rate = self.continual_learning_rate
                 elif self.args.opt == 'Adam':
                     if task_id == 0:
-                        self.optimizer = torch.optim.Adam(params, lr=self.args.lr)
+                        self.optimizer = torch.optim.Adam(params, lr=self.learning_rate)
+                        self.current_learning_rate = self.learning_rate
                     else:
-                        self.optimizer = torch.optim.Adam(params, lr=self.args.lr_continual)
+                        self.optimizer = torch.optim.Adam(params, lr=self.continual_learning_rate)
+                        self.current_learning_rate = self.continual_learning_rate
                 else:
                     raise NotImplementedError(self.args.opt)
 
@@ -197,24 +230,21 @@ class Client(object):
             if replay and experiment_name == 'pmnist':
                 if self.args.lr_scheduler == 'StepLR':
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,
-                                                                                   step_size=self.args.step_size,
-                                                                                   gamma=self.args.gamma)
+                                                                                   step_size=self.StepLR_step_size,
+                                                                                   gamma=self.StepLR_gamma)
                 elif self.args.lr_scheduler == 'CosALR':
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer,
-                                                                                              T_max=self.args.replay_T_max)
+                                                                                              T_max=self.CosineAnnealingLR_replay_T_max)
                 else:
                     raise NotImplementedError(self.args.lr_scheduler)
             else:
                 if self.args.lr_scheduler == 'StepLR':
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,
-                                                                                   step_size=self.args.step_size,
-                                                                                   gamma=self.args.gamma)
+                                                                                   step_size=self.StepLR_step_size,
+                                                                                   gamma=self.StepLR_gamma)
                 elif self.args.lr_scheduler == 'CosALR':
-                    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.T_max)
-                    lr_lambda = lambda cur_epoch: (
-                                                          cur_epoch + 1) / self.args.warmup if cur_epoch < self.args.warmup else 0.5 * (
-                            1 + math.cos(
-                        (cur_epoch - self.args.warmup) / (self.args.T_max - self.args.warmup) * math.pi))
+                    lr_lambda = lambda cur_epoch: (cur_epoch + 1) / self.warmup if cur_epoch < self.warmup else 0.5 * (
+                            1 + math.cos((cur_epoch - self.warmup) / (self.CosineAnnealingLR_T_max - self.warmup) * math.pi))
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer,
                                                                                      lr_lambda=lr_lambda)
                 else:
@@ -223,24 +253,21 @@ class Client(object):
             if replay:
                 if self.args.lr_scheduler == 'StepLR':
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,
-                                                                                   step_size=self.args.step_size,
-                                                                                   gamma=self.args.gamma)
+                                                                                   step_size=self.StepLR_step_size,
+                                                                                   gamma=self.StepLR_gamma)
                 elif self.args.lr_scheduler == 'CosALR':
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer,
-                                                                                              T_max=self.args.replay_T_max)
+                                                                                              T_max=self.CosineAnnealingLR_replay_T_max)
                 else:
                     raise NotImplementedError(self.args.lr_scheduler)
             else:
                 if self.args.lr_scheduler == 'StepLR':
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,
-                                                                                   step_size=self.args.step_size,
-                                                                                   gamma=self.args.gamma)
+                                                                                   step_size=self.StepLR_step_size,
+                                                                                   gamma=self.StepLR_gamma)
                 elif self.learning_rate_scheduler == 'CosALR':
-                    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.T_max)
-                    lr_lambda = lambda cur_epoch: (
-                                                          cur_epoch + 1) / self.args.warmup if cur_epoch < self.args.warmup else 0.5 * (
-                            1 + math.cos(
-                        (cur_epoch - self.args.warmup) / (self.args.T_max - self.args.warmup) * math.pi))
+                    lr_lambda = lambda cur_epoch: (cur_epoch + 1) / self.warmup if cur_epoch < self.warmup else 0.5 * (
+                            1 + math.cos((cur_epoch - self.warmup) / (self.CosineAnnealingLR_T_max - self.warmup) * math.pi))
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer,
                                                                                      lr_lambda=lr_lambda)
                 else:
@@ -249,24 +276,21 @@ class Client(object):
             if replay:
                 if self.args.lr_scheduler == 'StepLR':
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,
-                                                                                   step_size=self.args.step_size,
-                                                                                   gamma=self.args.gamma)
+                                                                                   step_size=self.StepLR_step_size,
+                                                                                   gamma=self.StepLR_gamma)
                 elif self.args.lr_scheduler == 'CosALR':
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer,
-                                                                                              T_max=self.args.replay_T_max)
+                                                                                              T_max=self.CosineAnnealingLR_replay_T_max)
                 else:
                     raise NotImplementedError(self.args.lr_scheduler)
             else:
                 if self.args.lr_scheduler == 'StepLR':
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,
-                                                                                   step_size=self.args.step_size,
-                                                                                   gamma=self.args.gamma)
+                                                                                   step_size=self.StepLR_step_size,
+                                                                                   gamma=self.StepLR_gamma)
                 elif self.args.lr_scheduler == 'CosALR':
-                    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.T_max)
-                    lr_lambda = lambda cur_epoch: (
-                                                          cur_epoch + 1) / self.args.warmup if cur_epoch < self.args.warmup else 0.5 * (
-                            1 + math.cos(
-                        (cur_epoch - self.args.warmup) / (self.args.T_max - self.args.warmup) * math.pi))
+                    lr_lambda = lambda cur_epoch: (cur_epoch + 1) / self.warmup if cur_epoch < self.warmup else 0.5 * (
+                            1 + math.cos((cur_epoch - self.warmup) / (self.CosineAnnealingLR_T_max - self.warmup) * math.pi))
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer,
                                                                                      lr_lambda=lr_lambda)
                 else:
@@ -275,24 +299,21 @@ class Client(object):
             if replay:
                 if self.args.lr_scheduler == 'StepLR':
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,
-                                                                                   step_size=self.args.step_size,
-                                                                                   gamma=self.args.gamma)
+                                                                                   step_size=self.StepLR_step_size,
+                                                                                   gamma=self.StepLR_gamma)
                 elif self.args.lr_scheduler == 'CosALR':
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer,
-                                                                                              T_max=self.args.replay_T_max)
+                                                                                              T_max=self.CosineAnnealingLR_replay_T_max)
                 else:
                     raise NotImplementedError(self.args.lr_scheduler)
             else:
                 if self.args.lr_scheduler == 'StepLR':
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer,
-                                                                                   step_size=self.args.step_size,
-                                                                                   gamma=self.args.gamma)
+                                                                                   step_size=self.StepLR_step_size,
+                                                                                   gamma=self.StepLR_gamma)
                 elif self.args.lr_scheduler == 'CosALR':
-                    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.T_max)
-                    lr_lambda = lambda cur_epoch: (
-                                                              cur_epoch + 1) / self.args.warmup if cur_epoch < self.args.warmup else 0.5 * (
-                            1 + math.cos(
-                        (cur_epoch - self.args.warmup) / (self.args.T_max - self.args.warmup) * math.pi))
+                    lr_lambda = lambda cur_epoch: (cur_epoch + 1) / self.warmup if cur_epoch < self.warmup else 0.5 * (
+                            1 + math.cos((cur_epoch - self.warmup) / (self.CosineAnnealingLR_T_max - self.warmup) * math.pi))
                     self.learning_rate_scheduler = torch.optim.lr_scheduler.LambdaLR(self.optimizer,
                                                                                      lr_lambda=lr_lambda)
                 else:

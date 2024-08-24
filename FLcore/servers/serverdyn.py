@@ -24,10 +24,10 @@ class FedDyn(Server):
         self.alpha = args.FedDyn_alpha
         self.server_state = None
 
-    def execute(self, experiment_name: str, replay: bool, HLOP_SNN: bool):
+    def execute(self, experiment_name: str, HLOP_SNN: bool):
         bptt, ottt = prepare_bptt_ottt(experiment_name)
         if bptt or ottt:
-            replay = False
+            self.replay = False
 
         hlop_out_num, hlop_out_num_inc, hlop_out_num_inc1 = prepare_hlop_out(experiment_name)
 
@@ -53,7 +53,7 @@ class FedDyn(Server):
                 param.data = torch.zeros_like(param.data)
 
             for client in self.clients:
-                if replay:
+                if self.replay:
                     client.set_replay_data(task_id, ncla)
                 client.set_optimizer(task_id, experiment_name, False)
                 client.set_learning_rate_scheduler(experiment_name, False)
@@ -100,7 +100,7 @@ class FedDyn(Server):
                 self.adjust_to_HLOP_SNN_after_train_task()
 
             # 如果重放并且起码参与了一个任务
-            if replay and task_count >= 1:
+            if self.replay and task_count >= 1:
                 print('memory replay\n')
                 for client in self.clients:
                     client.set_optimizer(task_id, experiment_name, True)
